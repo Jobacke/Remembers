@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.3.2';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -1232,10 +1232,18 @@ function openRecordModal(isAppend = false, noteId = null) {
     if (isAppend) {
         const note = state.notes.find(n => n.id === noteId);
         els.recordStatus.textContent = `Anhängen an: ${note ? truncateText(note.title, 20) : 'Notiz'}`;
-        // Hide title input since we are appending
-        els.saveForm.querySelector('.input-group').classList.add('hidden');
+
+        const groups = els.saveForm.querySelectorAll('.form-group');
+        if (groups.length > 1) {
+            groups[0].classList.add('hidden'); // Title
+            groups[1].classList.add('hidden'); // Category
+        }
     } else {
-        els.saveForm.querySelector('.input-group').classList.remove('hidden');
+        const groups = els.saveForm.querySelectorAll('.form-group');
+        if (groups.length > 1) {
+            groups[0].classList.remove('hidden');
+            groups[1].classList.remove('hidden');
+        }
     }
 
     state.selectedCategoryId = state.categories.length > 0 ? state.categories[0].id : null;
