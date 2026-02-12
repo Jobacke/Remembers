@@ -64,6 +64,7 @@ const state = {
     audioBlob: null,
     isRecording: false,
     recordingStartTime: null,
+    recordingDuration: 0,
     timerInterval: null,
     analyserNode: null,
     audioContext: null,
@@ -474,9 +475,7 @@ async function startRecording() {
             }
         };
 
-        state.mediaRecorder.onstop = () => {
-            state.audioBlob = new Blob(state.audioChunks, { type: state.mediaRecorder.mimeType });
-        };
+        // onstop is set dynamically in stopRecording() to support Promise-based waiting
 
         state.mediaRecorder.start(100); // Collect data every 100ms
         state.isRecording = true;
@@ -506,28 +505,43 @@ async function startRecording() {
 }
 
 function stopRecording() {
-    if (state.mediaRecorder && state.isRecording) {
-        state.mediaRecorder.stop();
-        state.isRecording = false;
+    return new Promise((resolve) => {
+        if (state.mediaRecorder && state.isRecording) {
+            // Capture duration before stopping
+            state.recordingDuration = state.recordingStartTime
+                ? (Date.now() - state.recordingStartTime) / 1000
+                : 0;
 
-        // Stop the media stream
-        if (state.mediaStream) {
-            state.mediaStream.getTracks().forEach(track => track.stop());
+            // Set onstop to create the blob and resolve the promise
+            state.mediaRecorder.onstop = () => {
+                state.audioBlob = new Blob(state.audioChunks, { type: state.mediaRecorder.mimeType });
+                resolve(state.audioBlob);
+            };
+
+            state.mediaRecorder.stop();
+            state.isRecording = false;
+
+            // Stop the media stream
+            if (state.mediaStream) {
+                state.mediaStream.getTracks().forEach(track => track.stop());
+            }
+
+            // Close audio context
+            if (state.audioContext) {
+                state.audioContext.close();
+            }
+
+            // Clear timer
+            clearInterval(state.timerInterval);
+
+            // Update UI
+            els.recordBtn.classList.remove('recording');
+            els.recordStatus.textContent = 'Aufnahme beendet';
+            els.recordStatus.classList.remove('recording-active');
+        } else {
+            resolve(state.audioBlob);
         }
-
-        // Close audio context
-        if (state.audioContext) {
-            state.audioContext.close();
-        }
-
-        // Clear timer
-        clearInterval(state.timerInterval);
-
-        // Update UI
-        els.recordBtn.classList.remove('recording');
-        els.recordStatus.textContent = 'Aufnahme beendet';
-        els.recordStatus.classList.remove('recording-active');
-    }
+    });
 }
 
 function discardRecording() {
@@ -1095,16 +1109,21 @@ function bindEvents() {
         if (e.target === els.recordModal) closeRecordModal();
     });
 
-    els.recordBtn.addEventListener('click', () => {
+    els.recordBtn.addEventListener('click', async () => {
         if (state.isRecording) {
-            stopRecording();
+            await stopRecording();
         } else {
             startRecording();
         }
     });
 
     els.recordDiscardBtn.addEventListener('click', discardRecording);
-    els.recordDoneBtn.addEventListener('click', showSaveForm);
+    els.recordDoneBtn.addEventListener('click', async () => {
+        if (state.isRecording) {
+            await stopRecording();
+        }
+        showSaveForm();
+    });
 
     // Save Form
     els.saveCancelBtn.addEventListener('click', () => {
@@ -1123,9 +1142,7 @@ function bindEvents() {
         }
 
         const title = els.noteTitle.value.trim();
-        const duration = state.recordingStartTime
-            ? (Date.now() - state.recordingStartTime) / 1000
-            : 0;
+        const duration = state.recordingDuration || 0;
 
         closeRecordModal();
         await saveNote(title, state.selectedCategoryId, state.audioBlob, duration);
