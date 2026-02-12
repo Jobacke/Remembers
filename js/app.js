@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -606,6 +606,31 @@ function toggleTranscriptEdit(noteId) {
     });
 }
 
+async function shareTranscript(noteId) {
+    const note = state.notes.find(n => n.id === noteId);
+    if (!note || !note.transcript) return;
+
+    const text = note.transcript;
+
+    if (navigator.share) {
+        try {
+            await navigator.share({
+                title: note.title || 'Notiz',
+                text: text
+            });
+        } catch (err) {
+            console.log('Share canceled or failed', err);
+        }
+    } else {
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast('Text kopiert!', 'success');
+        } catch (err) {
+            showToast('Konnte Text nicht kopieren', 'error');
+        }
+    }
+}
+
 async function deleteNote(noteId) {
     try {
         const note = state.notes.find(n => n.id === noteId);
@@ -1150,9 +1175,14 @@ function renderNotes() {
         <div class="note-transcript" data-transcript-container="${note.id}">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <span class="note-transcript-label">Transkript</span>
-                <button class="edit-transcript-btn" data-edit-id="${note.id}" title="Bearbeiten" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </button>
+                <div style="display:flex;gap:4px;">
+                    <button class="share-transcript-btn" data-share-id="${note.id}" title="Teilen" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                    </button>
+                    <button class="edit-transcript-btn" data-edit-id="${note.id}" title="Bearbeiten" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                    </button>
+                </div>
             </div>
             <div class="transcript-content" style="white-space:pre-wrap;">${escapeHtml(note.transcript).replace(/\n\n/g, '\n')}</div>
         </div>` : ''}
@@ -1198,6 +1228,13 @@ function renderNotes() {
                 'Die Aufnahme wird unwiderruflich gelöscht.',
                 () => deleteNote(btn.dataset.deleteId)
             );
+        });
+    });
+
+    els.notesList.querySelectorAll('.share-transcript-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            shareTranscript(btn.dataset.shareId);
         });
     });
 
