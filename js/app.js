@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.5.2';
+const APP_VERSION = '1.5.3';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -1666,6 +1666,8 @@ async function initApp(user) {
     // Set Version
     const verEl = document.getElementById('app-version-display');
     if (verEl) verEl.textContent = APP_VERSION;
+    const verOverlay = document.getElementById('version-overlay');
+    if (verOverlay) verOverlay.textContent = 'v' + APP_VERSION;
 }
 
 function showLogin() {
