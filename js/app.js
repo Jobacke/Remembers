@@ -65,6 +65,9 @@ const state = {
     isRecording: false,
     recordingStartTime: null,
     recordingDuration: 0,
+    recordingDuration: 0,
+    transcript: '',
+    recognition: null,
     timerInterval: null,
     analyserNode: null,
     audioContext: null,
@@ -150,6 +153,11 @@ const els = {
     uploadProgressFill: $('#upload-progress-fill'),
     // Toast
     toastContainer: $('#toast-container'),
+    // Transcript
+    transcriptPreview: $('#transcript-preview'),
+    transcriptPlaceholder: $('#transcript-placeholder'),
+    transcriptText: $('#transcript-text'),
+    noteTranscript: $('#note-transcript'),
 };
 
 // ============================================================
@@ -332,7 +340,7 @@ async function loadNotes() {
     }
 }
 
-async function saveNote(title, categoryId, audioBlob, duration) {
+async function saveNote(title, categoryId, audioBlob, duration, transcript) {
     try {
         if (!audioBlob) {
             console.error('saveNote: audioBlob is null/undefined');
@@ -384,6 +392,7 @@ async function saveNote(title, categoryId, audioBlob, duration) {
             audioPath,
             audioType: audioBlob.type,
             waveform,
+            transcript: transcript || '',
             createdAt: serverTimestamp()
         });
 
@@ -457,6 +466,51 @@ async function startRecording() {
     try {
         state.audioChunks = [];
         state.audioBlob = null;
+        state.transcript = '';
+        els.transcriptText.textContent = '';
+        els.transcriptText.classList.add('hidden');
+        els.transcriptPlaceholder.classList.remove('hidden');
+        els.transcriptPreview.classList.remove('hidden');
+
+        // Initialize Speech Recognition
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            state.recognition = new SpeechRecognition();
+            state.recognition.continuous = true;
+            state.recognition.interimResults = true;
+            state.recognition.lang = 'de-DE';
+
+            state.recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                if (finalTranscript || interimTranscript) {
+                    state.transcript += finalTranscript;
+                    els.transcriptText.innerHTML = `${state.transcript} <span style="color:var(--text-muted)">${interimTranscript}</span>`;
+                    els.transcriptText.classList.remove('hidden');
+                    els.transcriptPlaceholder.classList.add('hidden');
+                    // Auto-scroll to bottom
+                    els.transcriptPreview.scrollTop = els.transcriptPreview.scrollHeight;
+                }
+            };
+
+            state.recognition.onerror = (event) => {
+                console.warn('Speech recognition error', event.error);
+            };
+
+            state.recognition.start();
+        } else {
+            console.log('Speech recognition not supported in this browser.');
+            els.transcriptPlaceholder.textContent = 'Transkription in diesem Browser nicht verfügbar.';
+        }
 
         // Request microphone access
         state.mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -537,6 +591,12 @@ function stopRecording() {
 
             state.mediaRecorder.stop();
             state.isRecording = false;
+
+            // Stop Speech Recognition
+            if (state.recognition) {
+                state.recognition.stop();
+                state.recognition = null;
+            }
 
             // Stop the media stream
             if (state.mediaStream) {
@@ -828,6 +888,11 @@ function renderNotes() {
           </div>
           <span class="note-duration">${formatDuration(note.duration || 0)}</span>
         </div>
+        ${note.transcript ? `
+        <div class="note-transcript">
+            <span class="note-transcript-label">Transkript</span>
+            ${escapeHtml(note.transcript)}
+        </div>` : ''}
       </div>
     `;
     }).join('');
@@ -1040,8 +1105,13 @@ function showSaveForm() {
         return;
     }
     els.recordSection.classList.add('hidden');
+    els.transcriptPreview.classList.add('hidden'); // Hide preview in modal
     els.saveForm.classList.remove('hidden');
     renderCategorySelect();
+
+    // Fill text area with captured transcript
+    els.noteTranscript.value = state.transcript.trim();
+
     els.noteTitle.focus();
 }
 
@@ -1146,6 +1216,7 @@ function bindEvents() {
     els.saveCancelBtn.addEventListener('click', () => {
         els.saveForm.classList.add('hidden');
         els.recordSection.classList.remove('hidden');
+        els.transcriptPreview.classList.remove('hidden'); // Show preview again
     });
 
     els.saveBtn.addEventListener('click', async () => {
@@ -1162,9 +1233,10 @@ function bindEvents() {
         const duration = state.recordingDuration || 0;
         const blob = state.audioBlob;
         const categoryId = state.selectedCategoryId;
+        const transcript = els.noteTranscript.value.trim();
 
         closeRecordModal();
-        await saveNote(title, categoryId, blob, duration);
+        await saveNote(title, categoryId, blob, duration, transcript);
         renderCategoryFilter();
     });
 
