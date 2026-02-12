@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
