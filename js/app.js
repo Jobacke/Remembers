@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -32,11 +32,13 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.3.0/firebas
 import {
     getAuth,
     signInWithPopup,
-    signInWithRedirect,
-    getRedirectResult,
     GoogleAuthProvider,
     onAuthStateChanged,
-    signOut
+    signOut,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    sendPasswordResetEmail,
+    updateProfile
 } from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-auth.js';
 import {
     getFirestore,
@@ -74,6 +76,7 @@ const googleProvider = new GoogleAuthProvider();
 // APP STATE
 // ============================================================
 const state = {
+    isRegistering: false,
     user: null,
     categories: [],
     notes: [],
@@ -121,7 +124,15 @@ const $$ = (sel) => document.querySelectorAll(sel);
 const els = {
     loadingScreen: $('#loading-screen'),
     loginScreen: $('#login-screen'),
-    loginBtn: $('#login-btn'),
+    loginGoogleBtn: $('#login-google-btn'),
+    authForm: $('#auth-form'),
+    authEmail: $('#auth-email'),
+    authPassword: $('#auth-password'),
+    authName: $('#auth-name'),
+    authNameGroup: $('#auth-name-group'),
+    authSubmitBtn: $('#auth-submit-btn'),
+    authToggleBtn: $('#auth-toggle-btn'),
+    authForgotBtn: $('#auth-forgot-btn'),
     loginError: $('#login-error'),
     app: $('#app'),
     // Header
@@ -1417,9 +1428,95 @@ function showConfirmDialog(icon, title, message, onConfirm) {
 // EVENT HANDLERS
 // ============================================================
 
+/* AUTHENTICATION LOGIC */
+
+async function handleGoogleLogin() {
+    try {
+        await signInWithPopup(auth, googleProvider);
+    } catch (error) {
+        console.error('Google Login Error:', error);
+        els.loginError.textContent = error.message;
+        els.loginError.classList.remove('hidden');
+    }
+}
+
+async function handleAuthSubmit(e) {
+    e.preventDefault();
+    const email = els.authEmail.value.trim();
+    const password = els.authPassword.value.trim();
+    const name = els.authName.value.trim();
+
+    if (!email || !password) return;
+
+    els.loginError.classList.add('hidden');
+
+    try {
+        if (state.isRegistering) {
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            if (name) {
+                await updateProfile(userCredential.user, { displayName: name });
+            }
+        } else {
+            await signInWithEmailAndPassword(auth, email, password);
+        }
+    } catch (error) {
+        console.error('Auth Error:', error);
+        let msg = 'Ein Fehler ist aufgetreten.';
+        const code = error.code;
+        if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+            msg = 'E-Mail oder Passwort falsch.';
+        } else if (code === 'auth/email-already-in-use') {
+            msg = 'Diese E-Mail wird bereits verwendet.';
+        } else if (code === 'auth/weak-password') {
+            msg = 'Passwort ist zu schwach (min 6 Zeichen).';
+        }
+        els.loginError.textContent = msg;
+        els.loginError.classList.remove('hidden');
+    }
+}
+
+function toggleAuthMode() {
+    state.isRegistering = !state.isRegistering;
+    els.loginError.classList.add('hidden');
+
+    if (state.isRegistering) {
+        els.authNameGroup.classList.remove('hidden');
+        els.authSubmitBtn.textContent = 'Registrieren';
+        els.authToggleBtn.textContent = 'Bereits ein Konto? Anmelden';
+        els.authForgotBtn.classList.add('hidden');
+    } else {
+        els.authNameGroup.classList.add('hidden');
+        els.authSubmitBtn.textContent = 'Anmelden';
+        els.authToggleBtn.textContent = 'Noch kein Konto? Registrieren';
+        els.authForgotBtn.classList.remove('hidden');
+    }
+}
+
+async function handleForgotPassword() {
+    const email = els.authEmail.value.trim();
+    if (!email) {
+        els.loginError.textContent = 'Bitte gib deine E-Mail-Adresse ein, um das Passwort zurückzusetzen.';
+        els.loginError.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        await sendPasswordResetEmail(auth, email);
+        showToast('Passwort-Reset E-Mail gesendet!', 'success');
+        els.loginError.classList.add('hidden');
+    } catch (error) {
+        console.error('Reset Password Error:', error);
+        els.loginError.textContent = 'Fehler beim Senden der E-Mail (ungültige Adresse?).';
+        els.loginError.classList.remove('hidden');
+    }
+}
+
 function bindEvents() {
-    // Login
-    els.loginBtn.addEventListener('click', handleLogin);
+    // Auth Listeners
+    if (els.loginGoogleBtn) els.loginGoogleBtn.addEventListener('click', handleGoogleLogin);
+    if (els.authForm) els.authForm.addEventListener('submit', handleAuthSubmit);
+    if (els.authToggleBtn) els.authToggleBtn.addEventListener('click', toggleAuthMode);
+    if (els.authForgotBtn) els.authForgotBtn.addEventListener('click', handleForgotPassword);
 
     // User Menu
     els.btnUserMenu.addEventListener('click', (e) => {

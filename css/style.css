@@ -280,6 +280,90 @@ img {
   font-size: 0.875rem;
 }
 
+/* Auth Form Styles */
+.auth-input-group {
+  margin-bottom: var(--space-sm);
+  width: 100%;
+}
+
+.auth-input {
+  width: 100%;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 1rem;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.auth-input:focus {
+  border-color: var(--primary);
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  margin: var(--space-lg) 0;
+  width: 100%;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+
+.auth-divider span {
+  padding: 0 var(--space-sm);
+}
+
+.login-btn.primary-btn {
+  background: var(--primary);
+  color: white;
+  margin-top: var(--space-md);
+}
+
+.login-btn.primary-btn:hover {
+  background: var(--primary-dark);
+}
+
+.login-btn.google-btn {
+  background: white;
+  color: #374151;
+}
+
+.auth-links {
+  margin-top: var(--space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.text-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.9rem;
+  color: var(--primary);
+  cursor: pointer;
+}
+
+.text-link:hover {
+  text-decoration: underline;
+}
+
+.text-link.secondary {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
 /* ============================================================
    LOADING SPINNER
    ============================================================ */
@@ -1686,17 +1770,11 @@ img {
   display: block;
 }
 
-max-width: 640px;
-margin: 0 auto;
-border-left: 1px solid var(--border);
-border-right: 1px solid var(--border);
-}
-
 .category-filter {
   max-width: 640px;
   margin: 0 auto;
 }
-}
+
 
 /* ============================================================
    AUDIO PROGRESS BAR

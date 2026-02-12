@@ -32,7 +32,7 @@
       <h1 class="login-title">Sprachnotizen</h1>
       <p class="login-subtitle">Nimm deine Gedanken auf, organisiere sie in Bereichen und finde sie jederzeit wieder.
       </p>
-      <button id="login-btn" class="login-btn" type="button">
+      <button id="login-google-btn" class="login-btn google-btn" type="button">
         <svg viewBox="0 0 24 24" fill="none">
           <path
             d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"
@@ -49,6 +49,30 @@
         </svg>
         Mit Google anmelden
       </button>
+
+      <div class="auth-divider">
+        <span>oder mit E-Mail</span>
+      </div>
+
+      <form id="auth-form" class="auth-form" novalidate>
+        <div class="auth-input-group hidden" id="auth-name-group">
+          <input type="text" id="auth-name" class="auth-input" placeholder="Dein Name" autocomplete="name">
+        </div>
+        <div class="auth-input-group">
+          <input type="email" id="auth-email" class="auth-input" placeholder="E-Mail Adresse" required
+            autocomplete="username">
+        </div>
+        <div class="auth-input-group">
+          <input type="password" id="auth-password" class="auth-input" placeholder="Passwort" required
+            autocomplete="current-password">
+        </div>
+        <button type="submit" id="auth-submit-btn" class="login-btn primary-btn">Anmelden</button>
+      </form>
+
+      <div class="auth-links">
+        <button type="button" id="auth-toggle-btn" class="text-link">Noch kein Konto? Registrieren</button>
+        <button type="button" id="auth-forgot-btn" class="text-link secondary">Passwort vergessen?</button>
+      </div>
       <div id="login-error" class="login-error hidden"></div>
     </div>
   </div>
