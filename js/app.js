@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.7.1';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -80,6 +80,9 @@ const state = {
     user: null,
     categories: [],
     notes: [],
+    // Recording & Pause Detection
+    lastFinalEndTime: 0,
+    currentSegmentStartTime: 0,
     filteredNotes: [],
     activeFilter: 'all',
     searchQuery: '',
@@ -688,6 +691,8 @@ async function startRecording() {
         state.audioChunks = [];
         state.audioBlob = null;
         state.transcript = '';
+        state.lastFinalEndTime = Date.now();
+        state.currentSegmentStartTime = null;
         els.transcriptText.textContent = '';
         els.transcriptText.classList.add('hidden');
         els.transcriptPlaceholder.classList.remove('hidden');
@@ -703,24 +708,41 @@ async function startRecording() {
 
             state.recognition.onresult = (event) => {
                 let interimTranscript = '';
-                let finalTranscript = '';
 
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
+                    const result = event.results[i];
+                    const transcriptPart = result[0].transcript;
+
+                    if (result.isFinal) {
+                        let text = transcriptPart.trim();
+                        if (text) {
+                            let prefix = ' ';
+                            if (state.lastFinalEndTime > 0) {
+                                const segmentStart = state.currentSegmentStartTime || Date.now();
+                                // If pause > 1.2s, insert semicolon
+                                if (segmentStart - state.lastFinalEndTime > 1200) {
+                                    prefix = '; ';
+                                }
+                            }
+                            if (state.transcript === '') prefix = '';
+
+                            state.transcript += prefix + text;
+                            state.lastFinalEndTime = Date.now();
+                        }
+                        state.currentSegmentStartTime = null;
                     } else {
-                        interimTranscript += event.results[i][0].transcript;
+                        interimTranscript += transcriptPart;
+                        if (!state.currentSegmentStartTime) {
+                            state.currentSegmentStartTime = Date.now();
+                        }
                     }
                 }
 
-                if (finalTranscript || interimTranscript) {
-                    state.transcript += finalTranscript;
-                    els.transcriptText.innerHTML = `${state.transcript} <span style="color:var(--text-muted)">${interimTranscript}</span>`;
-                    els.transcriptText.classList.remove('hidden');
-                    els.transcriptPlaceholder.classList.add('hidden');
-                    // Auto-scroll to bottom
-                    els.transcriptPreview.scrollTop = els.transcriptPreview.scrollHeight;
-                }
+                els.transcriptText.innerHTML = `${state.transcript} <span style="color:var(--text-muted)">${interimTranscript}</span>`;
+                els.transcriptText.classList.remove('hidden');
+                els.transcriptPlaceholder.classList.add('hidden');
+                // Auto-scroll to bottom
+                els.transcriptPreview.scrollTop = els.transcriptPreview.scrollHeight;
             };
 
             state.recognition.onerror = (event) => {
