@@ -75,7 +75,11 @@ const state = {
     // Playback
     currentAudio: null,
     currentPlayingId: null,
+    currentSegmentIndex: 0,
     playbackInterval: null,
+    // Appending
+    isAppending: false,
+    appendingNoteId: null,
     // Category editing
     editingCategoryId: null,
     selectedColor: CATEGORY_COLORS[0],
@@ -83,6 +87,8 @@ const state = {
     // Save form
     selectedCategoryId: null,
 };
+
+
 
 // ============================================================
 // DOM ELEMENTS
@@ -186,6 +192,11 @@ function formatDate(timestamp) {
     } else {
         return date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     }
+}
+
+function truncateText(text, maxLength) {
+    if (!text) return '';
+    return text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
 }
 
 function generateWaveformData(count = 40) {
@@ -407,6 +418,96 @@ async function saveNote(title, categoryId, audioBlob, duration, transcript) {
         console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
         els.uploadOverlay.classList.add('hidden');
         showToast('Fehler beim Speichern der Notiz', 'error');
+    }
+}
+
+async function appendNote(noteId, audioBlob, duration, transcript) {
+    try {
+        if (!audioBlob) {
+            showToast('Keine Aufnahme vorhanden', 'error');
+            return;
+        }
+
+        els.uploadOverlay.classList.remove('hidden');
+        els.uploadProgressFill.style.width = '0%';
+
+        // 1. Upload new segment
+        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_part`;
+        const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'ogg';
+        const audioPath = `users/${state.user.uid}/notes/${fileName}.${ext}`;
+        const storageRef = ref(storage, audioPath);
+
+        const uploadTask = uploadBytesResumable(storageRef, audioBlob, { contentType: audioBlob.type });
+
+        await new Promise((resolve, reject) => {
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                    els.uploadProgressFill.style.width = `${progress}%`;
+                },
+                (error) => reject(error),
+                resolve
+            );
+        });
+
+        const audioUrl = await getDownloadURL(storageRef);
+
+        // 2. Fetch existing note data
+        const noteRef = doc(db, 'users', state.user.uid, 'notes', noteId);
+        const noteSnap = await getDoc(noteRef);
+
+        if (!noteSnap.exists()) {
+            throw new Error('Note not found');
+        }
+
+        const noteData = noteSnap.data();
+        let segments = noteData.audioSegments || [];
+
+        // Setup initial segment if missing
+        if (segments.length === 0 && noteData.audioUrl) {
+            segments.push({
+                audioUrl: noteData.audioUrl,
+                audioPath: noteData.audioPath || '',
+                duration: noteData.duration || 0,
+                transcript: noteData.transcript || '',
+                createdAt: noteData.createdAt ? noteData.createdAt.toMillis() : Date.now()
+            });
+        }
+
+        // Add new segment
+        segments.push({
+            audioUrl: audioUrl,
+            audioPath: audioPath,
+            duration: duration,
+            transcript: transcript || '',
+            createdAt: Date.now()
+        });
+
+        // Update Total Duration and Transcript
+        const newTotalDuration = segments.reduce((acc, seg) => acc + (seg.duration || 0), 0);
+        const newTotalTranscript = segments.map(s => s.transcript).filter(t => t).join('\n\n');
+
+        await updateDoc(noteRef, {
+            audioSegments: segments,
+            duration: newTotalDuration,
+            transcript: newTotalTranscript,
+            updatedAt: serverTimestamp()
+        });
+
+        els.uploadOverlay.classList.add('hidden');
+        showToast('Aufnahme angehängt!', 'success');
+
+        // Reset Append State
+        state.isAppending = false;
+        state.appendingNoteId = null;
+
+        await loadNotes();
+        renderNotes();
+
+    } catch (error) {
+        console.error('Error appending note:', error);
+        els.uploadOverlay.classList.add('hidden');
+        showToast('Fehler beim Anhängen', 'error');
     }
 }
 
@@ -673,6 +774,7 @@ function updateVisualizer() {
 }
 
 // ============================================================
+// ============================================================
 // AUDIO PLAYBACK
 // ============================================================
 
@@ -696,23 +798,39 @@ function togglePlayback(noteId) {
 
     // Start new playback
     const note = state.notes.find(n => n.id === noteId);
-    if (!note || !note.audioUrl) return;
+    if (!note) return;
 
-    state.currentAudio = new Audio(note.audioUrl);
+    // Support for multiple segments or single audioUrl
+    const segments = note.audioSegments || (note.audioUrl ? [{ audioUrl: note.audioUrl }] : []);
+    if (segments.length === 0) return;
+
     state.currentPlayingId = noteId;
+    state.currentSegmentIndex = 0;
+    playSegment(noteId, segments, 0);
+}
+
+function playSegment(noteId, segments, index) {
+    if (index >= segments.length) {
+        stopPlayback();
+        renderNotes(); // Reset UI state fully
+        return;
+    }
+
+    const url = segments[index].audioUrl;
+    state.currentAudio = new Audio(url);
+    state.currentSegmentIndex = index;
 
     state.currentAudio.play().then(() => {
         updatePlayButtonUI(noteId, true);
         startPlaybackProgressUpdate(noteId);
     }).catch(err => {
         console.error('Playback error:', err);
-        showToast('Fehler bei der Wiedergabe', 'error');
+        showToast('Fehler bei der Wiedergabe: ' + err.message, 'error');
         stopPlayback();
     });
 
     state.currentAudio.onended = () => {
-        stopPlayback();
-        renderNotes();
+        playSegment(noteId, segments, index + 1);
     };
 }
 
@@ -720,12 +838,30 @@ function startPlaybackProgressUpdate(noteId) {
     clearInterval(state.playbackInterval);
     state.playbackInterval = setInterval(() => {
         if (!state.currentAudio) return;
+
+        const note = state.notes.find(n => n.id === noteId);
+        const segments = note.audioSegments || (note.audioUrl ? [{ duration: note.duration }] : []);
+
+        // Progress within current segment
         const progress = (state.currentAudio.currentTime / state.currentAudio.duration) * 100;
+
         const progressBar = document.querySelector(`[data-note-id="${noteId}"] .audio-progress-fill`);
         const timeDisplay = document.querySelector(`[data-note-id="${noteId}"] .note-duration`);
-        if (progressBar) progressBar.style.width = `${progress}%`;
+
+        if (progressBar) {
+            progressBar.style.width = `${progress}%`;
+        }
+
         if (timeDisplay) {
-            timeDisplay.textContent = `${formatDuration(state.currentAudio.currentTime)} / ${formatDuration(state.currentAudio.duration)}`;
+            const currentSegDuration = state.currentAudio.duration || 0;
+            const currentSegTime = state.currentAudio.currentTime || 0;
+
+            // If multiple segments, show Part indicator
+            if (segments.length > 1) {
+                timeDisplay.textContent = `Teil ${state.currentSegmentIndex + 1}/${segments.length}: ${formatDuration(currentSegTime)}`;
+            } else {
+                timeDisplay.textContent = `${formatDuration(currentSegTime)} / ${formatDuration(currentSegDuration)}`;
+            }
         }
     }, 100);
 }
@@ -751,6 +887,7 @@ function stopPlayback() {
     }
     clearInterval(state.playbackInterval);
     state.currentPlayingId = null;
+    state.currentSegmentIndex = 0;
 }
 
 function seekAudio(noteId, e) {
@@ -760,7 +897,6 @@ function seekAudio(noteId, e) {
     const pct = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
     state.currentAudio.currentTime = pct * state.currentAudio.duration;
 }
-
 // ============================================================
 // FILTERING & SEARCH
 // ============================================================
@@ -869,6 +1005,11 @@ function renderNotes() {
           <div style="display:flex;align-items:center;gap:8px;">
             ${cat ? `<span class="note-card-category" style="background:${catColor}20;color:${catColor}">${cat.icon || ''} ${cat.name}</span>` : ''}
             <div class="note-card-actions">
+              <button class="note-action-btn append" data-append-id="${note.id}" title="Anhängen">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              </button>
               <button class="note-action-btn delete" data-delete-id="${note.id}" title="Löschen">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
@@ -902,6 +1043,13 @@ function renderNotes() {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             togglePlayback(btn.dataset.playId);
+        });
+    });
+
+    els.notesList.querySelectorAll('.note-action-btn.append').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openRecordModalForAppend(btn.dataset.appendId);
         });
     });
 
@@ -1043,8 +1191,31 @@ function closeModal(modal) {
     document.body.style.overflow = '';
 }
 
-function openRecordModal() {
+function openRecordModalForAppend(noteId) {
+    if (!state.user) {
+        showToast('Bitte erst einloggen', 'error');
+        return;
+    }
+    openRecordModal(true, noteId);
+}
+
+function openRecordModal(isAppend = false, noteId = null) {
+    if (typeof isAppend === 'object') isAppend = false; // Handle event object if passed directly
+
     resetRecordingUI();
+
+    state.isAppending = isAppend;
+    state.appendingNoteId = noteId;
+
+    if (isAppend) {
+        const note = state.notes.find(n => n.id === noteId);
+        els.recordStatus.textContent = `Anhängen an: ${note ? truncateText(note.title, 20) : 'Notiz'}`;
+        // Hide title input since we are appending
+        els.saveForm.querySelector('.input-group').classList.add('hidden');
+    } else {
+        els.saveForm.querySelector('.input-group').classList.remove('hidden');
+    }
+
     state.selectedCategoryId = state.categories.length > 0 ? state.categories[0].id : null;
     els.noteTitle.value = '';
     initVisualizer();
@@ -1224,16 +1395,24 @@ function bindEvents() {
             showToast('Keine Aufnahme vorhanden', 'error');
             return;
         }
+
+        const duration = state.recordingDuration || 0;
+        const blob = state.audioBlob;
+        const transcript = els.noteTranscript.value.trim();
+
+        if (state.isAppending && state.appendingNoteId) {
+            closeRecordModal();
+            await appendNote(state.appendingNoteId, blob, duration, transcript);
+            return;
+        }
+
         if (!state.selectedCategoryId) {
             showToast('Bitte wähle eine Kategorie', 'error');
             return;
         }
 
         const title = els.noteTitle.value.trim();
-        const duration = state.recordingDuration || 0;
-        const blob = state.audioBlob;
         const categoryId = state.selectedCategoryId;
-        const transcript = els.noteTranscript.value.trim();
 
         closeRecordModal();
         await saveNote(title, categoryId, blob, duration, transcript);
