@@ -334,6 +334,13 @@ async function loadNotes() {
 
 async function saveNote(title, categoryId, audioBlob, duration) {
     try {
+        if (!audioBlob) {
+            console.error('saveNote: audioBlob is null/undefined');
+            showToast('Keine Aufnahme vorhanden', 'error');
+            return;
+        }
+        console.log('saveNote: starting upload', { type: audioBlob.type, size: audioBlob.size, duration });
+
         els.uploadOverlay.classList.remove('hidden');
         els.uploadProgressFill.style.width = '0%';
 
@@ -341,6 +348,7 @@ async function saveNote(title, categoryId, audioBlob, duration) {
         const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'ogg';
         const audioPath = `users/${state.user.uid}/notes/${fileName}.${ext}`;
+        console.log('saveNote: uploading to path:', audioPath);
         const storageRef = ref(storage, audioPath);
 
         const uploadTask = uploadBytesResumable(storageRef, audioBlob, {
@@ -352,13 +360,19 @@ async function saveNote(title, categoryId, audioBlob, duration) {
                 (snapshot) => {
                     const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
                     els.uploadProgressFill.style.width = `${progress}%`;
+                    console.log('saveNote: upload progress', Math.round(progress) + '%');
                 },
-                reject,
+                (error) => {
+                    console.error('saveNote: upload failed', error.code, error.message);
+                    reject(error);
+                },
                 resolve
             );
         });
 
+        console.log('saveNote: upload complete, getting download URL');
         const audioUrl = await getDownloadURL(storageRef);
+        console.log('saveNote: got URL, saving to Firestore');
 
         // Save metadata to Firestore
         const waveform = generateWaveformData();
@@ -379,6 +393,9 @@ async function saveNote(title, categoryId, audioBlob, duration) {
         renderNotes();
     } catch (error) {
         console.error('Error saving note:', error);
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
         els.uploadOverlay.classList.add('hidden');
         showToast('Fehler beim Speichern der Notiz', 'error');
     }
