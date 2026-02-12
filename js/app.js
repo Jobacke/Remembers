@@ -3,6 +3,28 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
+const APP_VERSION = '1.3.1';
+
+window.onerror = function (msg, url, line, col, error) {
+    // Ignore resize loop errors which are harmless
+    if (msg.includes('ResizeObserver')) return;
+
+    console.error('Global Error:', msg, error);
+    // Try to show toast if possible
+    try {
+        const toastContainer = document.getElementById('toast-container');
+        if (toastContainer) {
+            const toast = document.createElement('div');
+            toast.className = 'toast error';
+            toast.innerHTML = `<span class="toast-icon">⚠️</span> ${msg}`;
+            toastContainer.appendChild(toast);
+            setTimeout(() => toast.remove(), 5000);
+        }
+    } catch (e) {
+        console.error('Failed to show error toast', e);
+    }
+};
+
 import { firebaseConfig, DEFAULT_CATEGORIES, CATEGORY_COLORS, CATEGORY_ICONS } from './config.js';
 
 // Firebase SDK Imports (from CDN)
@@ -1461,6 +1483,10 @@ async function initApp(user) {
     els.loadingScreen.classList.add('hidden');
     els.loginScreen.classList.add('hidden');
     els.app.classList.remove('hidden');
+
+    // Set Version
+    const verEl = document.getElementById('app-version-display');
+    if (verEl) verEl.textContent = APP_VERSION;
 }
 
 function showLogin() {
