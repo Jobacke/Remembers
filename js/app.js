@@ -1160,9 +1160,11 @@ function bindEvents() {
 
         const title = els.noteTitle.value.trim();
         const duration = state.recordingDuration || 0;
+        const blob = state.audioBlob;
+        const categoryId = state.selectedCategoryId;
 
         closeRecordModal();
-        await saveNote(title, state.selectedCategoryId, state.audioBlob, duration);
+        await saveNote(title, categoryId, blob, duration);
         renderCategoryFilter();
     });
 
