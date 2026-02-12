@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.7.2';
+const APP_VERSION = '1.7.3';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -719,8 +719,8 @@ async function startRecording() {
                             let prefix = ' ';
                             if (state.lastFinalEndTime > 0) {
                                 const segmentStart = state.currentSegmentStartTime || Date.now();
-                                // If pause > 0.75s, insert semicolon
-                                if (segmentStart - state.lastFinalEndTime > 750) {
+                                // If pause > 0.4s (adjusted for API latency), insert semicolon
+                                if (segmentStart - state.lastFinalEndTime > 400) {
                                     prefix = '; ';
                                 }
                             }
