@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.5.3';
+const APP_VERSION = '1.6.0';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -518,7 +518,7 @@ async function appendNote(noteId, audioBlob, duration, transcript) {
 
         // Update Total Duration and Transcript
         const newTotalDuration = segments.reduce((acc, seg) => acc + (seg.duration || 0), 0);
-        const newTotalTranscript = segments.map(s => s.transcript).filter(t => t).join('\n\n');
+        const newTotalTranscript = segments.map(s => s.transcript).filter(t => t).join('\n');
 
         await updateDoc(noteRef, {
             audioSegments: segments,
@@ -992,6 +992,19 @@ function seekAudio(noteId, e) {
     const pct = Math.max(0, Math.min(1, (x - rect.left) / rect.width));
     state.currentAudio.currentTime = pct * state.currentAudio.duration;
 }
+
+function seekRelative(noteId, diff) {
+    if (state.currentPlayingId === noteId && state.currentAudio) {
+        state.currentAudio.currentTime = Math.min(Math.max(0, state.currentAudio.currentTime + diff), state.currentAudio.duration);
+    }
+}
+
+function stopAndRestart(noteId) {
+    if (state.currentPlayingId === noteId) {
+        stopPlayback();
+    }
+    togglePlayback(noteId);
+}
 // ============================================================
 // FILTERING & SEARCH
 // ============================================================
@@ -1114,11 +1127,20 @@ function renderNotes() {
           </div>
         </div>
         <div class="note-card-bottom">
-          <button class="note-play-btn ${isPlaying ? 'playing' : ''}" data-play-id="${note.id}">
+          <div style="display:flex;align-items:center;">
+             <button class="restart-btn" data-restart-id="${note.id}" title="Neustart" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:32px;height:32px;margin-right:4px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+             </button>
+             <button class="seek-btn" data-seek-note="${note.id}" data-val="-15" title="-15s" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:11px;font-weight:600;margin-right:8px;">-15s</button>
+             
+             <button class="note-play-btn ${isPlaying ? 'playing' : ''}" data-play-id="${note.id}">
             ${isPlaying
                 ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>'
                 : '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>'}
-          </button>
+             </button>
+
+             <button class="seek-btn" data-seek-note="${note.id}" data-val="15" title="+15s" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:11px;font-weight:600;margin-left:8px;">+15s</button>
+          </div>
           <div class="audio-progress" data-seek-id="${note.id}">
             <div class="audio-progress-fill" style="width:${isPlaying && state.currentAudio ? (state.currentAudio.currentTime / state.currentAudio.duration * 100) : 0}%"></div>
           </div>
@@ -1132,7 +1154,7 @@ function renderNotes() {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
             </div>
-            <div class="transcript-content" style="white-space:pre-wrap;">${escapeHtml(note.transcript)}</div>
+            <div class="transcript-content" style="white-space:pre-wrap;">${escapeHtml(note.transcript).replace(/\n\n/g, '\n')}</div>
         </div>` : ''}
       </div>
     `;
@@ -1143,6 +1165,20 @@ function renderNotes() {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             togglePlayback(btn.dataset.playId);
+        });
+    });
+
+    els.notesList.querySelectorAll('.restart-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            stopAndRestart(btn.dataset.restartId);
+        });
+    });
+
+    els.notesList.querySelectorAll('.seek-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            seekRelative(btn.dataset.seekNote, parseInt(btn.dataset.val));
         });
     });
 
@@ -1331,7 +1367,11 @@ function openRecordModal(isAppend = false, noteId = null) {
         }
     }
 
-    state.selectedCategoryId = state.categories.length > 0 ? state.categories[0].id : null;
+    if (state.activeFilter && state.activeFilter !== 'all') {
+        state.selectedCategoryId = state.activeFilter;
+    } else {
+        state.selectedCategoryId = state.categories.length > 0 ? state.categories[0].id : null;
+    }
     els.noteTitle.value = '';
     initVisualizer();
     renderCategorySelect();
@@ -1667,7 +1707,7 @@ async function initApp(user) {
     const verEl = document.getElementById('app-version-display');
     if (verEl) verEl.textContent = APP_VERSION;
     const verOverlay = document.getElementById('version-overlay');
-    if (verOverlay) verOverlay.textContent = 'v' + APP_VERSION;
+    if (verOverlay) verOverlay.textContent = 'v ' + APP_VERSION;
 }
 
 function showLogin() {
