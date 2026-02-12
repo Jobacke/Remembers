@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.7.4';
+const APP_VERSION = '1.8.0';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -394,6 +394,15 @@ async function saveNote(title, categoryId, audioBlob, duration, transcript) {
             showToast('Keine Aufnahme vorhanden', 'error');
             return;
         }
+
+        // Logic for JUH category: Prepend "Materialliste; "
+        const category = state.categories.find(c => c.id === categoryId);
+        if (category && category.name === 'JUH') {
+            if (transcript && !transcript.startsWith('Materialliste')) {
+                transcript = 'Materialliste; ' + transcript;
+            }
+        }
+
         console.log('saveNote: starting upload', { type: audioBlob.type, size: audioBlob.size, duration });
 
         els.uploadOverlay.classList.remove('hidden');
