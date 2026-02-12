@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Sprachnotizen – Deine Stimme, organisiert</title>
+  <meta name="description" content="Nimm Sprachnotizen auf, organisiere sie in Kategorien und finde sie jederzeit wieder.">
+  <meta name="theme-color" content="#8b5cf6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Notizen">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ========== LOADING SCREEN ========== -->
+  <div id="loading-screen">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- ========== LOGIN SCREEN ========== -->
+  <div id="login-screen" class="hidden">
+    <div class="login-container">
+      <img src="icons/icon-192.png" alt="App Icon" class="login-logo">
+      <h1 class="login-title">Sprachnotizen</h1>
+      <p class="login-subtitle">Nimm deine Gedanken auf, organisiere sie in Bereichen und finde sie jederzeit wieder.</p>
+      <button id="login-btn" class="login-btn" type="button">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/>
+          <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+          <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
+          <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+        </svg>
+        Mit Google anmelden
+      </button>
+      <div id="login-error" class="login-error hidden"></div>
+    </div>
+  </div>
+
+  <!-- ========== MAIN APP ========== -->
+  <div id="app" class="hidden">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-top">
+        <div class="header-brand">
+          <img src="icons/icon-192.png" alt="" class="header-brand-icon">
+          <h1>Sprachnotizen</h1>
+        </div>
+        <div class="header-actions">
+          <button id="btn-categories" class="header-btn" title="Kategorien verwalten">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>
+            </svg>
+          </button>
+          <button id="btn-user-menu" class="header-btn" title="Menü">
+            <img id="header-avatar" class="header-avatar" src="" alt="Avatar">
+          </button>
+        </div>
+      </div>
+      <div class="search-bar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+        </svg>
+        <input id="search-input" type="search" placeholder="Notizen durchsuchen…" autocomplete="off">
+      </div>
+
+      <!-- User Menu Dropdown -->
+      <div id="user-menu" class="user-menu">
+        <div class="user-menu-header">
+          <div id="user-menu-name" class="user-menu-name"></div>
+          <div id="user-menu-email" class="user-menu-email"></div>
+        </div>
+        <button id="btn-manage-categories" class="user-menu-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/>
+          </svg>
+          Kategorien verwalten
+        </button>
+        <button id="btn-logout" class="user-menu-item danger">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
+          </svg>
+          Abmelden
+        </button>
+      </div>
+    </header>
+
+    <!-- Category Filter -->
+    <div id="category-filter" class="category-filter">
+      <!-- Dynamically populated -->
+    </div>
+
+    <!-- Notes List -->
+    <main class="notes-container">
+      <div class="notes-header">
+        <h2>Notizen</h2>
+        <span id="notes-count" class="notes-count"></span>
+      </div>
+      <div id="notes-list" class="notes-list">
+        <!-- Dynamically populated -->
+      </div>
+    </main>
+
+    <!-- FAB -->
+    <button id="fab-record" class="fab" title="Neue Aufnahme">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/>
+        <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8"/>
+      </svg>
+    </button>
+  </div>
+
+  <!-- ========== RECORD MODAL ========== -->
+  <div id="record-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2>Neue Aufnahme</h2>
+        <button id="record-modal-close" class="modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Recording Section -->
+      <div id="record-section" class="record-section">
+        <div id="record-timer" class="record-timer">00:00</div>
+        <div id="record-visualizer" class="record-visualizer">
+          <!-- Bars generated by JS -->
+        </div>
+        <p id="record-status" class="record-status">Tippe zum Aufnehmen</p>
+        <div class="record-btn-container">
+          <button id="record-discard-btn" class="record-secondary-btn hidden" title="Verwerfen">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+            </svg>
+          </button>
+          <button id="record-btn" class="record-btn" title="Aufnahme starten/stoppen">
+            <div class="record-icon"></div>
+          </button>
+          <button id="record-done-btn" class="record-secondary-btn hidden" title="Fertig">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Save Form (shown after recording) -->
+      <div id="save-form" class="save-form hidden">
+        <div class="form-group">
+          <label class="form-label" for="note-title">Titel</label>
+          <input id="note-title" class="form-input" type="text" placeholder="Titel der Notiz…" maxlength="100">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Kategorie</label>
+          <div id="category-select" class="category-select-grid">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+        <div class="form-actions">
+          <button id="save-cancel-btn" class="btn btn-secondary">Zurück</button>
+          <button id="save-btn" class="btn btn-primary">Speichern</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== CATEGORIES MODAL ========== -->
+  <div id="categories-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2 id="categories-modal-title">Kategorien</h2>
+        <button id="categories-modal-close" class="modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Category List View -->
+      <div id="categories-list-view">
+        <div id="categories-list" class="categories-list">
+          <!-- Dynamically populated -->
+        </div>
+        <button id="add-category-btn" class="add-category-btn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+          Neue Kategorie
+        </button>
+      </div>
+
+      <!-- Category Form View -->
+      <div id="category-form-view" class="category-form hidden">
+        <div class="form-group">
+          <label class="form-label" for="category-name">Name</label>
+          <input id="category-name" class="form-input" type="text" placeholder="Kategorie-Name…" maxlength="30">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Farbe</label>
+          <div id="color-picker" class="color-picker-grid">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Icon</label>
+          <div id="icon-picker" class="icon-picker-grid">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+        <div class="form-actions">
+          <button id="category-cancel-btn" class="btn btn-secondary">Abbrechen</button>
+          <button id="category-save-btn" class="btn btn-primary">Speichern</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== CONFIRM DIALOG ========== -->
+  <div id="confirm-dialog" class="confirm-dialog hidden">
+    <div class="confirm-dialog-content">
+      <div id="confirm-icon" class="confirm-dialog-icon">⚠️</div>
+      <h3 id="confirm-title">Bist du sicher?</h3>
+      <p id="confirm-message">Diese Aktion kann nicht rückgängig gemacht werden.</p>
+      <div class="confirm-dialog-actions">
+        <button id="confirm-cancel" class="btn btn-secondary">Abbrechen</button>
+        <button id="confirm-ok" class="btn btn-danger">Löschen</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== UPLOAD OVERLAY ========== -->
+  <div id="upload-overlay" class="uploading-overlay hidden">
+    <div class="spinner"></div>
+    <div class="uploading-text">Wird gespeichert…</div>
+    <div class="upload-progress">
+      <div id="upload-progress-fill" class="upload-progress-fill"></div>
+    </div>
+  </div>
+
+  <!-- ========== TOAST CONTAINER ========== -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- ========== SCRIPTS ========== -->
+  <script type="module" src="js/app.js"></script>
+
+</body>
+</html>
