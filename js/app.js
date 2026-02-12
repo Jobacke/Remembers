@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.7.3';
+const APP_VERSION = '1.7.4';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -618,7 +618,6 @@ async function shareTranscript(noteId) {
     if (navigator.share) {
         try {
             await navigator.share({
-                title: note.title || 'Notiz',
                 text: text
             });
         } catch (err) {
