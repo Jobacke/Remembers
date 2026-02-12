@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.3.2';
+const APP_VERSION = '1.4.0';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -533,6 +533,68 @@ async function appendNote(noteId, audioBlob, duration, transcript) {
     }
 }
 
+async function saveTranscript(noteId, newText) {
+    try {
+        const noteRef = doc(db, 'users', state.user.uid, 'notes', noteId);
+        await updateDoc(noteRef, {
+            transcript: newText,
+            updatedAt: serverTimestamp()
+        });
+        showToast('Transkript gespeichert', 'success');
+        await loadNotes();
+        renderNotes();
+    } catch (error) {
+        console.error('Error saving transcript:', error);
+        showToast('Fehler beim Speichern', 'error');
+    }
+}
+
+function toggleTranscriptEdit(noteId) {
+    const noteCard = document.querySelector(`.note-card[data-note-id="${noteId}"]`);
+    if (!noteCard) return;
+
+    const contentDiv = noteCard.querySelector('.transcript-content');
+    if (!contentDiv) return;
+
+    if (contentDiv.querySelector('textarea')) return;
+
+    const note = state.notes.find(n => n.id === noteId);
+    if (!note) return;
+
+    const currentText = note.transcript || '';
+
+    const editor = document.createElement('div');
+    editor.className = 'transcript-editor-container';
+
+    editor.innerHTML = `
+        <textarea style="width:100%;min-height:100px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text-primary);font-family:inherit;resize:vertical;font-size:14px;line-height:1.5;">${escapeHtml(currentText)}</textarea>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
+            <button class="btn-cancel" style="padding:4px 8px;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-secondary);">Abbrechen</button>
+            <button class="btn-save" style="padding:4px 8px;font-size:12px;background:var(--primary);border:none;border-radius:var(--radius-sm);cursor:pointer;color:white;">Speichern</button>
+        </div>
+    `;
+
+    contentDiv.innerHTML = '';
+    contentDiv.appendChild(editor);
+
+    const textarea = editor.querySelector('textarea');
+    textarea.focus();
+
+    textarea.addEventListener('click', e => e.stopPropagation());
+
+    editor.querySelector('.btn-cancel').addEventListener('click', (e) => {
+        e.stopPropagation();
+        contentDiv.innerHTML = escapeHtml(note.transcript);
+    });
+
+    editor.querySelector('.btn-save').addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const newText = textarea.value.trim();
+        editor.querySelector('.btn-save').textContent = '...';
+        await saveTranscript(noteId, newText);
+    });
+}
+
 async function deleteNote(noteId) {
     try {
         const note = state.notes.find(n => n.id === noteId);
@@ -1052,9 +1114,14 @@ function renderNotes() {
           <span class="note-duration">${formatDuration(note.duration || 0)}</span>
         </div>
         ${note.transcript ? `
-        <div class="note-transcript">
-            <span class="note-transcript-label">Transkript</span>
-            ${escapeHtml(note.transcript)}
+        <div class="note-transcript" data-transcript-container="${note.id}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span class="note-transcript-label">Transkript</span>
+                <button class="edit-transcript-btn" data-edit-id="${note.id}" title="Bearbeiten" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+            </div>
+            <div class="transcript-content" style="white-space:pre-wrap;">${escapeHtml(note.transcript)}</div>
         </div>` : ''}
       </div>
     `;
@@ -1084,6 +1151,13 @@ function renderNotes() {
                 'Die Aufnahme wird unwiderruflich gelöscht.',
                 () => deleteNote(btn.dataset.deleteId)
             );
+        });
+    });
+
+    els.notesList.querySelectorAll('.edit-transcript-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleTranscriptEdit(btn.dataset.editId);
         });
     });
 
