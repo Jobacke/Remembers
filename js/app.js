@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.9.1';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -83,6 +83,7 @@ const state = {
     // Recording & Pause Detection
     lastFinalEndTime: 0,
     currentSegmentStartTime: 0,
+    playbackRate: 1,
     filteredNotes: [],
     activeFilter: 'all',
     searchQuery: '',
@@ -618,6 +619,48 @@ function toggleTranscriptEdit(noteId) {
     });
 }
 
+
+
+async function exportPdf(noteId) {
+    const note = state.notes.find(n => n.id === noteId);
+    if (!note) return;
+
+    if (!window.jspdf) { showToast('PDF Export nicht verfügbar', 'error'); return; }
+    const { jsPDF } = window.jspdf;
+
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text(note.title || 'Notiz', 20, 20);
+
+    doc.setFontSize(10);
+    const dateStr = note.createdAt ? new Date(note.createdAt.seconds * 1000).toLocaleString() : new Date().toLocaleString(); // Firebase Timestamp to Date
+    // If createdAt is already milli (from local optimistic update)? Check type.
+    // Usually it is object with seconds.
+    // Wait, loadNotes maps data.
+    // Let's safe check.
+    let d = new Date();
+    if (note.createdAt && note.createdAt.seconds) d = new Date(note.createdAt.seconds * 1000);
+    else if (note.createdAt) d = new Date(note.createdAt);
+
+    const catName = state.categories.find(c => c.id === note.categoryId)?.name || 'Unkategorisiert';
+    doc.text(`Datum: ${d.toLocaleString()}`, 20, 30);
+    doc.text(`Kategorie: ${catName}`, 20, 35);
+
+    doc.setFontSize(12);
+    // splitTextToSize handles line breaks
+    const text = (note.transcript || '');
+    const splitText = doc.splitTextToSize(text, 170);
+    doc.text(splitText, 20, 50);
+
+    doc.save(`Notiz.pdf`);
+}
+
+function toggleSpeed() {
+    state.playbackRate = (state.playbackRate === 1) ? 1.5 : (state.playbackRate === 1.5 ? 2 : 1);
+    if (state.currentAudio) state.currentAudio.playbackRate = state.playbackRate;
+    document.querySelectorAll('.speed-btn').forEach(btn => btn.textContent = state.playbackRate + 'x');
+}
+
 async function shareTranscript(noteId) {
     const note = state.notes.find(n => n.id === noteId);
     if (!note || !note.transcript) return;
@@ -723,16 +766,31 @@ async function startRecording() {
 
                     if (result.isFinal) {
                         let text = transcriptPart.trim();
+
+                        // Magic Words: "Neue Zeile" -> \n, "Absatz" -> \n\n
+                        text = text.replace(/(\s|^)(neue\s+zeile)(\s|$|[.,?!])/gi, '\n');
+                        text = text.replace(/(\s|^)(absatz)(\s|$|[.,?!])/gi, '\n\n');
+
+                        // Clean up potential double newlines if trimmed
+                        // If text became ONLY whitespace/newlines, we keep it?
+                        // "Neue Zeile" -> "\n".  trim() would make it empty?
+                        // No, we trimmed BEFORE replace.
+                        // But now text contains "\n".
+                        // Wait, my logic below says: if (text) ...
+                        // If text is "\n", it is truthy.
+
                         if (text) {
                             let prefix = ' ';
                             if (state.lastFinalEndTime > 0) {
                                 const segmentStart = state.currentSegmentStartTime || Date.now();
                                 // If pause > 0.4s (adjusted for API latency), insert semicolon
-                                if (segmentStart - state.lastFinalEndTime > 400) {
+                                // But NOT if we just inserted a newline via magic word!
+                                // Check if text starts with \n?
+                                if (!text.startsWith('\n') && (segmentStart - state.lastFinalEndTime > 400)) {
                                     prefix = '; ';
                                 }
                             }
-                            if (state.transcript === '') prefix = '';
+                            if (state.transcript === '' || text.startsWith('\n')) prefix = '';
 
                             state.transcript += prefix + text;
                             state.lastFinalEndTime = Date.now();
@@ -968,6 +1026,7 @@ function playSegment(noteId, segments, index) {
 
     const url = segments[index].audioUrl;
     state.currentAudio = new Audio(url);
+    state.currentAudio.playbackRate = state.playbackRate || 1;
     state.currentSegmentIndex = index;
 
     state.currentAudio.play().then(() => {
@@ -1195,6 +1254,7 @@ function renderNotes() {
              </button>
 
              <button class="seek-btn" data-seek-note="${note.id}" data-val="15" title="+15s" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:11px;font-weight:600;margin-left:8px;">+15s</button>
+             <button class="speed-btn" data-speed-id="${note.id}" title="Geschwindigkeit" style="background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text-muted);font-size:10px;font-weight:600;margin-left:8px;padding:2px 4px;min-width:24px;">${state.playbackRate}x</button>
           </div>
           <div class="audio-progress" data-seek-id="${note.id}">
             <div class="audio-progress-fill" style="width:${isPlaying && state.currentAudio ? (state.currentAudio.currentTime / state.currentAudio.duration * 100) : 0}%"></div>
@@ -1206,6 +1266,9 @@ function renderNotes() {
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <span class="note-transcript-label">Transkript</span>
                 <div style="display:flex;gap:4px;">
+                    <button class="pdf-btn" data-pdf-id="${note.id}" title="Als PDF speichern" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                    </button>
                     <button class="share-transcript-btn" data-share-id="${note.id}" title="Teilen" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
                     </button>
@@ -1242,6 +1305,13 @@ function renderNotes() {
         });
     });
 
+    els.notesList.querySelectorAll('.speed-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleSpeed(btn.dataset.speedId);
+        });
+    });
+
     els.notesList.querySelectorAll('.note-action-btn.append').forEach(btn => {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1258,6 +1328,13 @@ function renderNotes() {
                 'Die Aufnahme wird unwiderruflich gelöscht.',
                 () => deleteNote(btn.dataset.deleteId)
             );
+        });
+    });
+
+    els.notesList.querySelectorAll('.pdf-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            exportPdf(btn.dataset.pdfId);
         });
     });
 
