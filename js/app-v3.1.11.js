@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.11';
+const APP_VERSION = '3.1.12';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -1879,7 +1879,12 @@ async function initApp(user) {
 
     // Color Migration (visual only, for old purple data)
     state.categories.forEach(c => {
-        if (c.color === '#8b5cf6' || c.color === '#8B5CF6') c.color = '#EAB308';
+        // Aggressive check for ANY purple variant or default
+        const oldPurples = ['#8b5cf6', '#8B5CF6', '#7c3aed', '#6366f1', 'rgb(139, 92, 246)'];
+        if (!c.color || oldPurples.includes(c.color) || c.color.toLowerCase() === '#8b5cf6') {
+            console.log('Migrating purple category:', c.name);
+            c.color = '#EAB308';
+        }
     });
 
     // Render
