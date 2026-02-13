@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.21';
+const APP_VERSION = '3.1.22';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -1442,12 +1442,29 @@ function renderNotes() {
 
     els.notesCount.textContent = `${state.filteredNotes.length} ${state.filteredNotes.length === 1 ? 'Notiz' : 'Notizen'}`;
 
-    if (state.filteredNotes.length === 0) {
+    const isEmpty = state.filteredNotes.length === 0;
+
+    // Toggle FAB visibility
+    if (isEmpty && !state.searchQuery) {
+        els.fabRecord.classList.add('hidden');
+    } else {
+        els.fabRecord.classList.remove('hidden');
+    }
+
+    if (isEmpty) {
         els.notesList.innerHTML = `
       <div class="empty-state">
         <div class="empty-state-icon">🎙️</div>
         <h3>${state.searchQuery ? 'Keine Ergebnisse' : 'Noch keine Notizen'}</h3>
         <p>${state.searchQuery ? 'Versuch es mit einem anderen Suchbegriff.' : 'Tippe auf den Aufnahme-Button, um deine erste Sprachnotiz zu erstellen.'}</p>
+        ${!state.searchQuery ? `
+        <button class="empty-state-record-btn" title="Neue Aufnahme" style="margin-top:24px;width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg, #ef4444, #dc2626);color:white;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px rgba(239, 68, 68, 0.4);cursor:pointer;transition:transform 0.2s;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="32" height="32" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z" />
+            <path d="M19 10v2a7 7 0 01-14 0v-2M12 19v4M8 23h8" />
+            </svg>
+        </button>
+        ` : ''}
       </div>
     `;
         return;
@@ -2099,6 +2116,14 @@ function bindEvents() {
         if (seekBar) {
             e.stopPropagation();
             seekAudio(seekBar.dataset.seekId, e);
+            return;
+        }
+
+        // Empty State Record Button
+        const emptyRecordBtn = target.closest('.empty-state-record-btn');
+        if (emptyRecordBtn) {
+            e.stopPropagation();
+            openRecordModal();
             return;
         }
     });
