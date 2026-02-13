@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.20';
+const APP_VERSION = '3.1.21';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -72,7 +72,10 @@ import {
     orderBy,
     where,
     serverTimestamp,
-    Timestamp
+    Timestamp,
+    enableIndexedDbPersistence,
+    disableNetwork,
+    enableNetwork
 } from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-firestore.js';
 import {
     getStorage,
@@ -88,6 +91,18 @@ import {
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
+
+// Enable Offline Persistence
+enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code == 'failed-precondition') {
+        // Multiple tabs open, persistence can only be enabled in one tab at a a time.
+        console.warn('Persistence failed: Multiple tabs open');
+    } else if (err.code == 'unimplemented') {
+        // The current browser does not support all of the features required to enable persistence
+        console.warn('Persistence not supported by browser');
+    }
+});
+
 const storage = getStorage(firebaseApp);
 const googleProvider = new GoogleAuthProvider();
 
@@ -113,7 +128,6 @@ const state = {
     isRecording: false,
     recordingStartTime: null,
     recordingDuration: 0,
-    recordingDuration: 0,
     transcript: '',
     recognition: null,
     timerInterval: null,
@@ -134,6 +148,9 @@ const state = {
     selectedIcon: CATEGORY_ICONS[0],
     // Save form
     selectedCategoryId: null,
+    // Offline
+    isOffline: !navigator.onLine,
+    uploadQueue: []
 };
 
 
@@ -266,6 +283,147 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `<span class="toast-icon">${icons[type]}</span> ${message}`;
     els.toastContainer.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
+}
+
+// ============================================================
+// OFFLINE MANAGER
+// ============================================================
+
+const OfflineManager = {
+    dbName: 'notizen-offline-db',
+    storeName: 'pending-uploads',
+    db: null,
+
+    init() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, 1);
+            request.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                    db.createObjectStore(this.storeName, { keyPath: 'id' });
+                }
+            };
+            request.onsuccess = (e) => {
+                this.db = e.target.result;
+                resolve();
+            };
+            request.onerror = (e) => reject(e);
+        });
+    },
+
+    async addToQueue(noteData) {
+        return new Promise((resolve, reject) => {
+            if (!this.db) { resolve(); return; }
+            const tx = this.db.transaction(this.storeName, 'readwrite');
+            const store = tx.objectStore(this.storeName);
+            store.put(noteData);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    },
+
+    async getAll() {
+        return new Promise((resolve, reject) => {
+            if (!this.db) { resolve([]); return; }
+            const tx = this.db.transaction(this.storeName, 'readonly');
+            const store = tx.objectStore(this.storeName);
+            const request = store.getAll();
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    },
+
+    async remove(id) {
+        return new Promise((resolve, reject) => {
+            if (!this.db) { resolve(); return; }
+            const tx = this.db.transaction(this.storeName, 'readwrite');
+            const store = tx.objectStore(this.storeName);
+            store.delete(id);
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+};
+
+async function syncOfflineNotes() {
+    if (!navigator.onLine) return;
+
+    // Simple lock to prevent double sync
+    if (state.isSyncing) return;
+    state.isSyncing = true;
+
+    try {
+        const queue = await OfflineManager.getAll();
+        if (queue.length === 0) {
+            state.isSyncing = false;
+            return;
+        }
+
+        showToast(`Synchronisiere ${queue.length} Notizen...`, 'info');
+
+        for (const item of queue) {
+            try {
+                if (item.type === 'create') {
+                    await saveNote(item.title, item.categoryId, item.audioBlob, item.duration, item.transcript, true);
+                } else if (item.type === 'append') {
+                    await appendNote(item.noteId, item.audioBlob, item.duration, item.transcript, true);
+                }
+                await OfflineManager.remove(item.id);
+            } catch (e) {
+                console.error('Sync failed for item', item.id, e);
+            }
+        }
+
+        showToast('Synchronisation abgeschlossen', 'success');
+        // Refresh local notes list to remove temp items if we were displaying them mixed
+        await loadNotes();
+        renderNotes();
+    } catch (e) {
+        console.error('Sync error:', e);
+    } finally {
+        state.isSyncing = false;
+    }
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+async function uploadAudioToStorage(audioBlob, basePath) {
+    const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'ogg';
+    const audioPath = `${basePath}/${fileName}.${ext}`;
+    const storageRef = ref(storage, audioPath);
+
+    const uploadTask = uploadBytesResumable(storageRef, audioBlob, {
+        contentType: audioBlob.type
+    });
+
+    return new Promise((resolve, reject) => {
+        uploadTask.on('state_changed',
+            (snapshot) => {
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                els.uploadProgressFill.style.width = `${progress}%`;
+            },
+            (error) => reject(error),
+            () => {
+                getDownloadURL(storageRef).then((url) => {
+                    resolve({ url, path: audioPath });
+                }).catch(reject);
+            }
+        );
+    });
+}
+
+function applyCategoryTemplate(transcript, categoryId) {
+    const cat = state.categories.find(c => c.id === categoryId);
+    if (cat && cat.name === 'JUH') {
+        const prefix = "Liebe RD-Besatzung!\nWir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt.\nVielen Dank für Eure Unterstützung!\nHerzliche Grüße Johannes\n\n";
+        if (transcript && !transcript.startsWith('Liebe RD-Besatzung')) {
+            return prefix + transcript;
+        }
+    }
+    return transcript;
 }
 
 // ============================================================
@@ -407,57 +565,53 @@ async function loadNotes() {
     }
 }
 
-async function saveNote(title, categoryId, audioBlob, duration, transcript) {
+async function saveNote(title, categoryId, audioBlob, duration, transcript, isSync = false) {
     try {
         if (!audioBlob) {
-            console.error('saveNote: audioBlob is null/undefined');
             showToast('Keine Aufnahme vorhanden', 'error');
             return;
         }
 
-        // Logic for JUH category: Prepend Welcome Text
-        const cat = state.categories.find(c => c.id === categoryId);
-        if (cat && cat.name === 'JUH') {
-            const prefix = "Liebe RD-Besatzung!\nWir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt.\nVielen Dank für Eure Unterstützung!\nHerzliche Grüße Johannes\n\n";
-            if (transcript && !transcript.startsWith('Liebe RD-Besatzung')) {
-                transcript = prefix + transcript;
-            }
+        // Offline Check
+        if (!navigator.onLine && !isSync) {
+            const tempId = `temp_${Date.now()}`;
+            const offlineNote = {
+                id: tempId,
+                title,
+                categoryId,
+                audioBlob,
+                duration,
+                transcript,
+                type: 'create',
+                createdAt: Date.now()
+            };
+
+            await OfflineManager.addToQueue(offlineNote);
+
+            // Add to state for immediate display
+            state.notes.unshift({
+                id: tempId,
+                title,
+                categoryId,
+                duration,
+                transcript,
+                createdAt: { toDate: () => new Date() }, // Mock Timestamp
+                isOffline: true
+            });
+
+            renderNotes();
+            showToast('Offline gespeichert (Wird später hochgeladen)', 'info');
+            return;
         }
 
-        console.log('saveNote: starting upload', { type: audioBlob.type, size: audioBlob.size, duration });
+        // Apply Template
+        transcript = applyCategoryTemplate(transcript, categoryId);
 
         els.uploadOverlay.classList.remove('hidden');
         els.uploadProgressFill.style.width = '0%';
 
-        // Upload audio to Firebase Storage
-        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'ogg';
-        const audioPath = `users/${state.user.uid}/notes/${fileName}.${ext}`;
-        console.log('saveNote: uploading to path:', audioPath);
-        const storageRef = ref(storage, audioPath);
-
-        const uploadTask = uploadBytesResumable(storageRef, audioBlob, {
-            contentType: audioBlob.type
-        });
-
-        await new Promise((resolve, reject) => {
-            uploadTask.on('state_changed',
-                (snapshot) => {
-                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                    els.uploadProgressFill.style.width = `${progress}%`;
-                    console.log('saveNote: upload progress', Math.round(progress) + '%');
-                },
-                (error) => {
-                    console.error('saveNote: upload failed', error.code, error.message);
-                    reject(error);
-                },
-                resolve
-            );
-        });
-
-        console.log('saveNote: upload complete, getting download URL');
-        const audioUrl = await getDownloadURL(storageRef);
-        console.log('saveNote: got URL, saving to Firestore');
+        // Upload
+        const { url: audioUrl, path: audioPath } = await uploadAudioToStorage(audioBlob, `users/${state.user.uid}/notes`);
 
         // Save metadata to Firestore
         const waveform = generateWaveformData();
@@ -479,44 +633,39 @@ async function saveNote(title, categoryId, audioBlob, duration, transcript) {
         renderNotes();
     } catch (error) {
         console.error('Error saving note:', error);
-        console.error('Error code:', error.code);
-        console.error('Error message:', error.message);
-        console.error('Error details:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
         els.uploadOverlay.classList.add('hidden');
         showToast('Fehler beim Speichern der Notiz', 'error');
     }
 }
 
-async function appendNote(noteId, audioBlob, duration, transcript) {
+async function appendNote(noteId, audioBlob, duration, transcript, isSync = false) {
     try {
         if (!audioBlob) {
             showToast('Keine Aufnahme vorhanden', 'error');
             return;
         }
 
+        // Offline Check
+        if (!navigator.onLine && !isSync) {
+            const tempId = `temp_append_${Date.now()}`;
+            await OfflineManager.addToQueue({
+                id: tempId,
+                noteId,
+                audioBlob,
+                duration,
+                transcript,
+                type: 'append',
+                createdAt: Date.now()
+            });
+            showToast('Offline angehängt (Wird später hochgeladen)', 'info');
+            return;
+        }
+
         els.uploadOverlay.classList.remove('hidden');
         els.uploadProgressFill.style.width = '0%';
 
-        // 1. Upload new segment
-        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 9)}_part`;
-        const ext = audioBlob.type.includes('webm') ? 'webm' : audioBlob.type.includes('mp4') ? 'mp4' : 'ogg';
-        const audioPath = `users/${state.user.uid}/notes/${fileName}.${ext}`;
-        const storageRef = ref(storage, audioPath);
-
-        const uploadTask = uploadBytesResumable(storageRef, audioBlob, { contentType: audioBlob.type });
-
-        await new Promise((resolve, reject) => {
-            uploadTask.on('state_changed',
-                (snapshot) => {
-                    const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                    els.uploadProgressFill.style.width = `${progress}%`;
-                },
-                (error) => reject(error),
-                resolve
-            );
-        });
-
-        const audioUrl = await getDownloadURL(storageRef);
+        // 1. Upload new segment using helper
+        const { url: audioUrl, path: audioPath } = await uploadAudioToStorage(audioBlob, `users/${state.user.uid}/notes`);
 
         // 2. Fetch existing note data
         const noteRef = doc(db, 'users', state.user.uid, 'notes', noteId);
@@ -1326,6 +1475,7 @@ function renderNotes() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 ${formatDate(note.createdAt)}
               </span>
+              ${note.isOffline ? '<span style="color:var(--warning);font-weight:bold;margin-left:8px;">⚠️ Offline</span>' : ''}
             </div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;">
@@ -1386,88 +1536,6 @@ function renderNotes() {
       </div>
     `;
     }).join('');
-
-    // Bind note events
-    els.notesList.querySelectorAll('.note-play-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            togglePlayback(btn.dataset.playId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.restart-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            stopAndRestart(btn.dataset.restartId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.seek-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            seekRelative(btn.dataset.seekNote, parseInt(btn.dataset.val));
-        });
-    });
-
-    els.notesList.querySelectorAll('.speed-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleSpeed(btn.dataset.speedId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.note-action-btn.append').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            openRecordModalForAppend(btn.dataset.appendId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.note-action-btn.delete').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            showConfirmDialog(
-                '🗑️',
-                'Notiz löschen?',
-                'Die Aufnahme wird unwiderruflich gelöscht.',
-                () => deleteNote(btn.dataset.deleteId)
-            );
-        });
-    });
-
-    els.notesList.querySelectorAll('.pdf-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            exportPdf(btn.dataset.pdfId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.share-transcript-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            shareTranscript(btn.dataset.shareId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.edit-transcript-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleTranscriptEdit(btn.dataset.editId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.edit-title-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            toggleTitleEdit(btn.dataset.editTitleId);
-        });
-    });
-
-    els.notesList.querySelectorAll('.audio-progress').forEach(prog => {
-        const handler = (e) => seekAudio(prog.dataset.seekId, e);
-        prog.addEventListener('click', handler);
-        prog.addEventListener('touchstart', handler, { passive: true });
-    });
 }
 
 function escapeHtml(text) {
@@ -1933,11 +2001,115 @@ function bindEvents() {
                 els.confirmDialog.classList.add('hidden');
             } else if (els.recordModal.classList.contains('active')) {
                 closeRecordModal();
-            } else if (els.categoriesModal.classList.contains('active')) {
-                closeCategoriesModal();
             }
         }
     });
+
+    // Note List Event Delegation
+    els.notesList.addEventListener('click', (e) => {
+        const target = e.target;
+
+        // Play
+        const playBtn = target.closest('.note-play-btn');
+        if (playBtn) {
+            e.stopPropagation();
+            togglePlayback(playBtn.dataset.playId);
+            return;
+        }
+
+        // Restart
+        const restartBtn = target.closest('.restart-btn');
+        if (restartBtn) {
+            e.stopPropagation();
+            stopAndRestart(restartBtn.dataset.restartId);
+            return;
+        }
+
+        // Seek (+/- 15s)
+        const seekBtn = target.closest('.seek-btn');
+        if (seekBtn) {
+            e.stopPropagation();
+            seekRelative(seekBtn.dataset.seekNote, parseInt(seekBtn.dataset.val));
+            return;
+        }
+
+        // Speed
+        const speedBtn = target.closest('.speed-btn');
+        if (speedBtn) {
+            e.stopPropagation();
+            toggleSpeed(speedBtn.dataset.speedId);
+            return;
+        }
+
+        // Append
+        const appendBtn = target.closest('.note-action-btn.append');
+        if (appendBtn) {
+            e.stopPropagation();
+            openRecordModalForAppend(appendBtn.dataset.appendId);
+            return;
+        }
+
+        // Delete
+        const deleteBtn = target.closest('.note-action-btn.delete');
+        if (deleteBtn) {
+            e.stopPropagation();
+            showConfirmDialog(
+                '🗑️',
+                'Notiz löschen?',
+                'Die Aufnahme wird unwiderruflich gelöscht.',
+                () => deleteNote(deleteBtn.dataset.deleteId)
+            );
+            return;
+        }
+
+        // PDF
+        const pdfBtn = target.closest('.pdf-btn');
+        if (pdfBtn) {
+            e.stopPropagation();
+            exportPdf(pdfBtn.dataset.pdfId);
+            return;
+        }
+
+        // Share
+        const shareBtn = target.closest('.share-transcript-btn');
+        if (shareBtn) {
+            e.stopPropagation();
+            shareTranscript(shareBtn.dataset.shareId);
+            return;
+        }
+
+        // Edit Transcript
+        const editTransBtn = target.closest('.edit-transcript-btn');
+        if (editTransBtn) {
+            e.stopPropagation();
+            toggleTranscriptEdit(editTransBtn.dataset.editId);
+            return;
+        }
+
+        // Edit Title
+        const editTitleBtn = target.closest('.edit-title-btn');
+        if (editTitleBtn) {
+            e.stopPropagation();
+            toggleTitleEdit(editTitleBtn.dataset.editTitleId);
+            return;
+        }
+
+        // Seek Bar (Click)
+        const seekBar = target.closest('.audio-progress');
+        if (seekBar) {
+            e.stopPropagation();
+            seekAudio(seekBar.dataset.seekId, e);
+            return;
+        }
+    });
+
+    // Touchstart for scrubbing (passive)
+    els.notesList.addEventListener('touchstart', (e) => {
+        const seekBar = e.target.closest('.audio-progress');
+        if (seekBar) {
+            seekAudio(seekBar.dataset.seekId, e);
+        }
+    }, { passive: true });
 }
 
 // ============================================================
@@ -2005,6 +2177,25 @@ async function main() {
         }
     } catch (error) {
         console.error('Redirect result error:', error);
+    }
+
+    // Init Offline Manager
+    await OfflineManager.init();
+
+    // Online Status Listeners
+    window.addEventListener('online', () => {
+        state.isOffline = false;
+        showToast('Du bist wieder online', 'success');
+        syncOfflineNotes();
+    });
+    window.addEventListener('offline', () => {
+        state.isOffline = true;
+        showToast('Du bist offline', 'info');
+    });
+
+    // Initial Sync Check
+    if (navigator.onLine) {
+        setTimeout(syncOfflineNotes, 2000);
     }
 
     // Listen for auth state changes
