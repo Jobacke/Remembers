@@ -1,9 +1,9 @@
-const CACHE_NAME = 'sprachnotizen-v3.1.4';
+const CACHE_NAME = 'sprachnotizen-v3.1.5';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
-  '/css/style.css',
-  '/js/app.js',
+  '/css/style-v3.1.5.css',
+  '/js/app-v3.1.5.js',
   '/js/config.js',
   '/manifest.json',
   '/icons/icon-192.png',
