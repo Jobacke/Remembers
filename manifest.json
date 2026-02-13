@@ -2,7 +2,7 @@
   "name": "Sprachnotizen",
   "short_name": "Notizen",
   "description": "Sprachnotizen einfach aufnehmen und organisieren",
-  "start_url": "/",
+  "start_url": "/?v=3.1.8",
   "display": "standalone",
   "background_color": "#0f0f23",
   "theme_color": "#EAB308",

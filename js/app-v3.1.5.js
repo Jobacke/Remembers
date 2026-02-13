@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.7';
+const APP_VERSION = '3.1.8';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
