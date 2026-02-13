@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.19';
+const APP_VERSION = '3.1.20';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -575,6 +575,77 @@ async function appendNote(noteId, audioBlob, duration, transcript) {
         els.uploadOverlay.classList.add('hidden');
         showToast('Fehler beim Anhängen', 'error');
     }
+}
+
+function toggleTitleEdit(noteId) {
+    const noteCard = document.querySelector(`.note-card[data-note-id="${noteId}"]`);
+    if (!noteCard) return;
+
+    const titleRow = noteCard.querySelector('.note-card-title-row');
+    if (!titleRow) return;
+
+    // Check if already editing
+    if (titleRow.querySelector('input')) return;
+
+    const titleDiv = titleRow.querySelector('.note-card-title');
+    const currentTitle = titleDiv.textContent;
+    const editBtn = titleRow.querySelector('.edit-title-btn');
+
+    // Hide title and edit button
+    titleDiv.style.display = 'none';
+    editBtn.style.display = 'none';
+
+    // Create input form
+    const form = document.createElement('form');
+    form.style.display = 'flex';
+    form.style.gap = '8px';
+    form.style.flex = '1';
+    form.style.alignItems = 'center';
+
+    form.innerHTML = `
+        <input type="text" value="${escapeHtml(currentTitle)}" style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px 8px;font-size:14px;color:var(--text-primary);min-width:0;">
+        <button type="submit" class="btn-save" title="Speichern" style="background:var(--primary);color:var(--text-on-primary);border:none;border-radius:var(--radius-sm);padding:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;width:28px;height:28px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </button>
+        <button type="button" class="btn-cancel" title="Abbrechen" style="background:transparent;border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--text-muted);width:28px;height:28px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+    `;
+
+    titleRow.insertBefore(form, editBtn); // Insert before the (hidden) edit button
+
+    const input = form.querySelector('input');
+    input.focus();
+    input.select();
+
+    // Handlers
+    const closeEdit = () => {
+        form.remove();
+        titleDiv.style.display = '';
+        editBtn.style.display = '';
+    };
+
+    form.querySelector('.btn-cancel').addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeEdit();
+    });
+
+    form.querySelector('input').addEventListener('click', (e) => e.stopPropagation());
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const newTitle = input.value.trim();
+        if (newTitle && newTitle !== currentTitle) {
+            // Optimistic update
+            titleDiv.textContent = newTitle;
+            closeEdit();
+            // Call backend
+            await updateNoteTitle(noteId, newTitle);
+        } else {
+            closeEdit();
+        }
+    });
 }
 
 async function saveTranscript(noteId, newText) {
@@ -1244,7 +1315,12 @@ function renderNotes() {
         <div style="position:absolute;top:0;left:0;width:4px;height:100%;background:${catColor};border-radius:4px 0 0 4px;"></div>
         <div class="note-card-top">
           <div class="note-card-info">
-            <div class="note-card-title">${escapeHtml(note.title || 'Unbenannte Notiz')}</div>
+            <div class="note-card-title-row" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
+                <div class="note-card-title" style="margin-bottom:0;flex:1;">${escapeHtml(note.title || 'Unbenannte Notiz')}</div>
+                <button class="edit-title-btn" data-edit-title-id="${note.id}" title="Titel bearbeiten" style="opacity:0.6;border:none;background:none;cursor:pointer;padding:4px;color:var(--text-muted);">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+            </div>
             <div class="note-card-meta">
               <span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -1377,6 +1453,13 @@ function renderNotes() {
         btn.addEventListener('click', (e) => {
             e.stopPropagation();
             toggleTranscriptEdit(btn.dataset.editId);
+        });
+    });
+
+    els.notesList.querySelectorAll('.edit-title-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleTitleEdit(btn.dataset.editTitleId);
         });
     });
 
