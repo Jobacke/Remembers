@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.0.6';
+const APP_VERSION = '3.1.0';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -594,7 +594,7 @@ function toggleTranscriptEdit(noteId) {
         <textarea style="width:100%;min-height:100px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text-primary);font-family:inherit;resize:vertical;font-size:14px;line-height:1.5;">${escapeHtml(currentText)}</textarea>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
             <button class="btn-cancel" style="padding:4px 8px;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-secondary);">Abbrechen</button>
-            <button class="btn-save" style="padding:4px 8px;font-size:12px;background:var(--primary);border:none;border-radius:var(--radius-sm);cursor:pointer;color:white;">Speichern</button>
+            <button class="btn-save" style="padding:4px 8px;font-size:12px;background:var(--primary);border:none;border-radius:var(--radius-sm);cursor:pointer;color:var(--text-on-primary, black);">Speichern</button>
         </div>
     `;
 

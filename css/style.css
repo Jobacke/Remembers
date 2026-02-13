@@ -21,12 +21,14 @@
   --glass-border: rgba(255, 255, 255, 0.08);
   --glass-border-hover: rgba(255, 255, 255, 0.15);
 
-  /* Primary (Violet) */
-  --primary: #8b5cf6;
-  --primary-light: #a78bfa;
-  --primary-dark: #7c3aed;
-  --primary-glow: rgba(139, 92, 246, 0.3);
-  --primary-subtle: rgba(139, 92, 246, 0.1);
+  /* Primary (Friendly Yellow) */
+  --primary: #EAB308;
+  --primary-light: #FACC15;
+  --primary-dark: #CA8A04;
+  --primary-glow: rgba(234, 179, 8, 0.4);
+  --primary-subtle: rgba(234, 179, 8, 0.15);
+
+  --text-on-primary: #1F2937;
 
   /* Accent */
   --accent-pink: #ec4899;
@@ -327,7 +329,7 @@ img {
 
 .login-btn.primary-btn {
   background: var(--primary);
-  color: white;
+  color: var(--text-on-primary);
   margin-top: var(--space-md);
 }
 
@@ -1148,7 +1150,7 @@ img {
 
 .btn-primary {
   background: linear-gradient(135deg, var(--primary), var(--primary-dark));
-  color: white;
+  color: var(--text-on-primary);
   box-shadow: 0 2px 10px var(--primary-glow);
 }
 
