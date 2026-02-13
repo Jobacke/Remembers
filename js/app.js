@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.0.4';
+const APP_VERSION = '3.0.5';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -772,9 +772,10 @@ async function startRecording() {
                     if (result.isFinal) {
                         let text = transcriptPart.trim();
 
-                        // Magic Words: More aggressive replacement
-                        text = text.replace(/neue\s+zeile/gi, '\n');
-                        text = text.replace(/absatz/gi, '\n\n');
+                        // Magic Words: "Zeile" -> \n, "Absatz" -> \n\n
+                        // Using word boundaries \b to avoid matching inside other words
+                        text = text.replace(/\bzeile\b/gi, '\n');
+                        text = text.replace(/\babsatz\b/gi, '\n\n');
 
                         // Clean up potential double newlines if trimmed
                         // If text became ONLY whitespace/newlines, we keep it?
