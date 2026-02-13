@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.0.1';
+const APP_VERSION = '3.0.2';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -1514,7 +1514,13 @@ function openRecordModal(isAppend = false, noteId = null) {
     if (state.activeFilter && state.activeFilter !== 'all') {
         state.selectedCategoryId = state.activeFilter;
     } else {
-        state.selectedCategoryId = state.categories.length > 0 ? state.categories[0].id : null;
+        // Default to "JUH" if available, else first category
+        const juhCat = state.categories.find(c => c.name === 'JUH');
+        if (juhCat) {
+            state.selectedCategoryId = juhCat.id;
+        } else {
+            state.selectedCategoryId = state.categories.length > 0 ? state.categories[0].id : null;
+        }
     }
     els.noteTitle.value = '';
     initVisualizer();
