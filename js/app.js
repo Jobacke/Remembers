@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.0.5';
+const APP_VERSION = '3.0.6';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -796,7 +796,9 @@ async function startRecording() {
                                     prefix = '; ';
                                 }
                             }
-                            if (state.transcript === '' || text.startsWith('\n')) prefix = '';
+
+                            // Prevent semicolon at the start of a new line
+                            if (state.transcript === '' || text.startsWith('\n') || state.transcript.endsWith('\n')) prefix = '';
 
                             state.transcript += prefix + text;
                             state.lastFinalEndTime = Date.now();
