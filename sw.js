@@ -1,11 +1,13 @@
-const CACHE_NAME = 'sprachnotizen-v1';
+const CACHE_NAME = 'sprachnotizen-v3.1.3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/css/style.css',
   '/js/app.js',
   '/js/config.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png'
 ];
 
 // Install - cache static assets
@@ -34,10 +36,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   // Skip non-GET and Firebase/Google API requests
   if (event.request.method !== 'GET' ||
-      event.request.url.includes('firebaseio.com') ||
-      event.request.url.includes('googleapis.com') ||
-      event.request.url.includes('gstatic.com') ||
-      event.request.url.includes('firebasestorage.googleapis.com')) {
+    event.request.url.includes('firebaseio.com') ||
+    event.request.url.includes('googleapis.com') ||
+    event.request.url.includes('gstatic.com') ||
+    event.request.url.includes('firebasestorage.googleapis.com')) {
     return;
   }
 
