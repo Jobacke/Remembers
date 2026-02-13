@@ -51,12 +51,9 @@
 </head>
 
 <body>
-  <div
-    style="background: red; color: white; padding: 10px; font-weight: bold; text-align: center; position: fixed; top: 0; left: 0; right: 0; z-index: 10000;">
-    VERSION 3.1.15 - PURPLE DESTROYER
-  </div>
+  <!-- DEBUG BANNER REMOVED v3.1.16 -->
   <script>
-    // EMERGENCY UPDATE v3.1.13
+    // EMERGENCY UPDATE v3.1.16
     try {
       if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(r => r.forEach(s => s.unregister()));
       if ('caches' in window) caches.keys().then(k => k.forEach(n => caches.delete(n)));
@@ -355,7 +352,7 @@
   <!-- ========== TOAST CONTAINER ========== -->
   <div id="version-overlay"
     style="position: fixed; bottom: 8px; right: 8px; font-size: 13px; font-weight: bold; color: rgba(255,255,255,0.8); background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 9999;">
-    v3.1.12</div>
+    v3.1.16</div>
   <div id="toast-container" class="toast-container"></div>
 
   <!-- ========== SCRIPTS ========== -->
