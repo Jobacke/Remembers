@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.18';
+const APP_VERSION = '3.1.19';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -415,11 +415,12 @@ async function saveNote(title, categoryId, audioBlob, duration, transcript) {
             return;
         }
 
-        // Logic for JUH category: Prepend "Materialliste! "
-        const category = state.categories.find(c => c.id === categoryId);
-        if (category && category.name === 'JUH') {
-            if (transcript && !transcript.startsWith('Materialliste')) {
-                transcript = 'Materialliste! ' + transcript;
+        // Logic for JUH category: Prepend Welcome Text
+        const cat = state.categories.find(c => c.id === categoryId);
+        if (cat && cat.name === 'JUH') {
+            const prefix = "Liebe RD-Besatzung!\nWir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt.\nVielen Dank für Eure Unterstützung!\nHerzliche Grüße Johannes\n\n";
+            if (transcript && !transcript.startsWith('Liebe RD-Besatzung')) {
+                transcript = prefix + transcript;
             }
         }
 
