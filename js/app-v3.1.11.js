@@ -3,7 +3,97 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.23';
+const APP_VERSION = '3.1.24';
+
+const FAQ_HTML = `
+<div style="padding: 0 8px;">
+<h2 style="font-size:1.5rem;margin-bottom:16px;">🎙️ Grundfunktionen</h2>
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Wie erstelle ich eine neue Sprachnotiz?</h3>
+<p>Tippe einfach auf den großen <strong>roten Mikrofon-Button</strong> unten rechts (oder in der Mitte, falls du noch keine Notizen hast).</p>
+<ul style="padding-left:20px;margin-top:8px;">
+    <li><strong>Starten:</strong> Tippe einmal, um die Aufnahme zu beginnen.</li>
+    <li><strong>Stoppen:</strong> Tippe erneut auf den Button oder "Fertig", um die Aufnahme zu beenden.</li>
+    <li><strong>Speichern:</strong> Im Anschluss kannst du der Notiz einen Titel geben und eine Kategorie auswählen.</li>
+</ul>
+
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Wie höre ich meine Notizen an?</h3>
+<p>Tippe in der Liste auf den <strong>Play-Button</strong> ▶️ einer Notiz.</p>
+<ul style="padding-left:20px;margin-top:8px;">
+    <li>Über den <strong>Fortschrittsbalken</strong> kannst du an eine beliebige Stelle springen.</li>
+    <li>Mit den Buttons <strong>-15s</strong> und <strong>+15s</strong> spulst du schnell vor oder zurück.</li>
+    <li>Die <strong>Geschwindigkeit</strong> kannst du ändern, indem du auf "1x" tippst (Optionen: 1x, 1.5x, 2x).</li>
+</ul>
+
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Funktionieren die Aufnahmen auch offline?</h3>
+<p><strong>Ja!</strong> Die App hat einen intelligenten <strong>Offline-Modus</strong>.</p>
+<ul style="padding-left:20px;margin-top:8px;">
+    <li>Wenn du kein Internet hast (z.B. im Keller), werden deine Aufnahmen lokal gespeichert.</li>
+    <li>Sie erscheinen in der Liste mit einem <strong>"⚠️ Offline"</strong> Hinweis.</li>
+    <li>Sobald du wieder Internet hast, werden sie <strong>automatisch hochgeladen</strong> und synchronisiert.</li>
+</ul>
+
+<hr style="margin:32px 0;border:0;border-top:1px solid var(--border);">
+
+<h2 style="font-size:1.5rem;margin-bottom:16px;">📂 Kategorien & Organisation</h2>
+<p>Du kannst deine Notizen in verschiedene Bereiche (Kategorien) einsortieren, z.B. <em>Privat</em>, <em>Beruf</em>, <em>Einkauf</em>.</p>
+<ul style="padding-left:20px;margin-top:8px;">
+    <li><strong>Filtern:</strong> Oben in der App findest du Chips für jede Kategorie. Tippe darauf, um nur Notizen dieser Kategorie zu sehen.</li>
+    <li><strong>Verwalten:</strong> Über das Menü (dein Profilbild oben rechts) -> "Kategorien verwalten" kannst du neue Kategorien erstellen oder Farben ändern.</li>
+</ul>
+
+<hr style="margin:32px 0;border:0;border-top:1px solid var(--border);">
+
+<h2 style="font-size:1.5rem;margin-bottom:16px;">🚑 Spezial-Feature: Kategorie "JUH"</h2>
+<p>Für den Dienst bei der Johanniter-Unfall-Hilfe (oder ähnlichen Organisationen) gibt es eine intelligente Sonderfunktion.</p>
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Automatische Begrüßung</h3>
+<p>Wenn du eine Notiz in der Kategorie <strong>"JUH"</strong> speicherst, prüft die App den Text.
+Sie fügt <strong>automatisch</strong> einen freundlichen Begrüßungstext für die nachfolgende Schicht oder die Wache hinzu, falls dieser noch nicht vorhanden ist:</p>
+<blockquote style="border-left:4px solid var(--primary);padding-left:16px;margin:16px 0;font-style:italic;color:var(--text-primary);">
+    "Liebe RD-Besatzung! Wir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt. Vielen Dank für Eure Unterstützung! Herzliche Grüße Johannes"
+</blockquote>
+<p>Das spart dir Zeit beim Diktieren von Materialanforderungen!</p>
+
+<hr style="margin:32px 0;border:0;border-top:1px solid var(--border);">
+
+<h2 style="font-size:1.5rem;margin-bottom:16px;">➕ Fortgeschrittene Funktionen</h2>
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Aufnahmen anfügen (Append)</h3>
+<p>Du hast etwas vergessen? Kein Problem!</p>
+<ol style="padding-left:20px;margin-top:8px;">
+    <li>Suche die bestehende Notiz.</li>
+    <li>Tippe auf das <strong>Mikrofon-Symbol mit dem Plus (+)</strong> in der Aktionsleiste der Notiz.</li>
+    <li>Nimm den Nachtrag auf.</li>
+    <li>Die neue Aufnahme wird <strong>nahtlos hinten angehängt</strong>. Beim Abspielen hörst du alles am Stück.</li>
+</ol>
+
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Transkript bearbeiten</h3>
+<p>Die App wandelt Sprache automatisch in Text um (Speech-to-Text).
+<ul style="padding-left:20px;margin-top:8px;">
+    <li>Falls sich ein Fehler eingeschlichen hat, tippe auf das <strong>Stift-Symbol</strong> ✏️ beim Text.</li>
+    <li>Du kannst den Text korrigieren und speichern.</li>
+</ul>
+
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Titel nachträglich ändern</h3>
+<p>Tippe einfach auf den <strong>Stift ✏️ neben dem Titel</strong> der Notiz, um ihn direkt in der Übersicht zu ändern.</p>
+
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">PDF Export & Teilen</h3>
+<ul style="padding-left:20px;margin-top:8px;">
+    <li><strong>PDF:</strong> Tippe auf das <strong>PDF-Symbol</strong>, um eine schön formatierte Datei mit Datum, Kategorie und Text zu erstellen. Perfekt zum Ausdrucken oder Weiterleiten.</li>
+    <li><strong>Teilen:</strong> Über das <strong>Teilen-Symbol</strong> kannst du den Text der Notiz direkt in WhatsApp, Mail oder andere Apps kopieren.</li>
+</ul>
+
+<hr style="margin:32px 0;border:0;border-top:1px solid var(--border);">
+
+<h2 style="font-size:1.5rem;margin-bottom:16px;">📱 Installation (Apple User)</h2>
+<p>Für das beste Erlebnis auf dem iPhone:</p>
+<ol style="padding-left:20px;margin-top:8px;">
+    <li>Öffne die Webseite in <strong>Safari</strong>.</li>
+    <li>Tippe unten auf den <strong>Teilen-Button</strong> (Viereck mit Pfeil nach oben).</li>
+    <li>Wähle <strong>"Zum Home-Bildschirm"</strong>.</li>
+    <li>Jetzt hast du die App wie eine normale App auf deinem Screen – ohne Adressleiste und im Vollbild!</li>
+</ol>
+<div style="height:40px;"></div>
+</div>
+`;
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -184,6 +274,7 @@ const els = {
     userMenuName: $('#user-menu-name'),
     userMenuEmail: $('#user-menu-email'),
     btnManageCategories: $('#btn-manage-categories'),
+    btnFaq: $('#btn-faq'),
     btnLogout: $('#btn-logout'),
     // Notes
     categoryFilter: $('#category-filter'),
@@ -227,6 +318,10 @@ const els = {
     confirmMessage: $('#confirm-message'),
     confirmCancel: $('#confirm-cancel'),
     confirmOk: $('#confirm-ok'),
+    // FAQ
+    faqModal: $('#faq-modal'),
+    faqContent: $('#faq-content'),
+    faqModalClose: $('#faq-modal-close'),
     // Upload
     uploadOverlay: $('#upload-overlay'),
     uploadProgressFill: $('#upload-progress-fill'),
@@ -1922,6 +2017,17 @@ function bindEvents() {
         els.userMenu.classList.remove('active');
         openCategoriesModal();
     });
+    els.btnFaq.addEventListener('click', () => {
+        els.userMenu.classList.remove('active');
+        els.faqContent.innerHTML = FAQ_HTML;
+        openModal(els.faqModal);
+    });
+    els.faqModalClose.addEventListener('click', () => {
+        closeModal(els.faqModal);
+    });
+    els.faqModal.addEventListener('click', (e) => {
+        if (e.target === els.faqModal) closeModal(els.faqModal);
+    });
     els.categoriesModalClose.addEventListener('click', closeCategoriesModal);
     els.addCategoryBtn.addEventListener('click', () => showCategoryForm());
     els.categoryCancelBtn.addEventListener('click', showCategoriesListView);
@@ -2018,6 +2124,10 @@ function bindEvents() {
                 els.confirmDialog.classList.add('hidden');
             } else if (els.recordModal.classList.contains('active')) {
                 closeRecordModal();
+            } else if (els.categoriesModal.classList.contains('active')) {
+                closeCategoriesModal();
+            } else if (els.faqModal.classList.contains('active')) {
+                closeModal(els.faqModal);
             }
         }
     });
