@@ -477,7 +477,18 @@ img {
   height: 36px;
   border-radius: var(--radius-full);
   border: 2px solid var(--primary);
-  object-fit: cover;
+  /* Initials support */
+  background-color: var(--primary);
+  background-position: center;
+  background-size: cover;
+  color: var(--text-on-primary);
+  font-weight: 700;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  overflow: hidden;
 }
 
 /* ---------- Search Bar ---------- */

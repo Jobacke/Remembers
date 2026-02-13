@@ -3,7 +3,26 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.1';
+const APP_VERSION = '3.1.2';
+function getInitials(user) {
+    if (!user) return '?';
+    const name = user.displayName;
+    if (name) {
+        const parts = name.trim().split(/\s+/);
+        if (parts.length > 1) {
+            return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        } else if (name.length > 1) {
+            return name.substring(0, 2).toUpperCase();
+        } else {
+            return name[0].toUpperCase();
+        }
+    }
+    // Fallback email
+    if (user.email) {
+        return user.email.substring(0, 2).toUpperCase();
+    }
+    return 'U';
+}
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -1845,7 +1864,13 @@ async function initApp(user) {
     state.user = user;
 
     // Update header
-    els.headerAvatar.src = user.photoURL || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.displayName || 'U')}&background=8b5cf6&color=fff`;
+    if (user.photoURL) {
+        els.headerAvatar.style.backgroundImage = `url(${user.photoURL})`;
+        els.headerAvatar.textContent = '';
+    } else {
+        els.headerAvatar.style.backgroundImage = 'none';
+        els.headerAvatar.textContent = getInitials(user);
+    }
     els.userMenuName.textContent = user.displayName || 'Benutzer';
     els.userMenuEmail.textContent = user.email || '';
 
