@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.6';
+const APP_VERSION = '3.1.7';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -1927,13 +1927,14 @@ async function main() {
     });
 
     // Register Service Worker
-    if ('serviceWorker' in navigator) {
-        try {
-            await navigator.serviceWorker.register('/sw.js');
-        } catch (e) {
-            console.warn('SW registration failed:', e);
-        }
-    }
+    // Register Service Worker - DISABLED FOR DEBUGGING/FIXING IOS CACHE
+    // if ('serviceWorker' in navigator) {
+    //     try {
+    //         await navigator.serviceWorker.register('/sw.js');
+    //     } catch (e) {
+    //         console.warn('SW registration failed:', e);
+    //     }
+    // }
 }
 
 main();
