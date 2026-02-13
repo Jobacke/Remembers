@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.9';
+const APP_VERSION = '3.1.10';
 function getInitials(user) {
     if (!user) return '?';
     const name = user.displayName;
@@ -1236,7 +1236,7 @@ function renderNotes() {
         const cat = getCategoryById(note.categoryId);
         const isPlaying = state.currentPlayingId === note.id;
         const waveform = note.waveform || generateWaveformData();
-        const catColor = cat ? cat.color : '#8b5cf6';
+        const catColor = cat ? cat.color : '#EAB308';
 
         return `
       <div class="note-card" data-note-id="${note.id}" style="--cat-color: ${catColor}">
@@ -1876,6 +1876,11 @@ async function initApp(user) {
 
     // Load data
     await Promise.all([loadCategories(), loadNotes()]);
+
+    // Color Migration (visual only, for old purple data)
+    state.categories.forEach(c => {
+        if (c.color === '#8b5cf6' || c.color === '#8B5CF6') c.color = '#EAB308';
+    });
 
     // Render
     renderCategoryFilter();

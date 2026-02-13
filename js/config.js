@@ -17,7 +17,7 @@ export const firebaseConfig = {
 
 // Standard-Kategorien für neue Benutzer
 export const DEFAULT_CATEGORIES = [
-    { name: 'Allgemein', color: '#8b5cf6', icon: '📝' },
+    { name: 'Allgemein', color: '#EAB308', icon: '📝' },
     { name: 'Arbeit', color: '#3b82f6', icon: '💼' },
     { name: 'Privat', color: '#10b981', icon: '🏠' },
     { name: 'Ideen', color: '#f59e0b', icon: '💡' },
@@ -26,7 +26,7 @@ export const DEFAULT_CATEGORIES = [
 
 // Verfügbare Farben für Kategorien
 export const CATEGORY_COLORS = [
-    '#8b5cf6', '#7c3aed', '#6366f1', '#3b82f6', '#0ea5e9',
+    '#EAB308', '#7c3aed', '#6366f1', '#3b82f6', '#0ea5e9',
     '#06b6d4', '#14b8a6', '#10b981', '#22c55e', '#84cc16',
     '#f59e0b', '#f97316', '#ef4444', '#ec4899', '#d946ef'
 ];
