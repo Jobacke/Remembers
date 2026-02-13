@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.0.2';
+const APP_VERSION = '3.0.3';
 
 window.onerror = function (msg, url, line, col, error) {
     // Ignore resize loop errors which are harmless
@@ -643,7 +643,12 @@ async function exportPdf(noteId) {
     else if (note.createdAt) d = new Date(note.createdAt);
 
     const catName = state.categories.find(c => c.id === note.categoryId)?.name || 'Unkategorisiert';
-    doc.text(`Datum: ${d.toLocaleString()}`, 20, 30);
+
+    // Format Date: 24h format (de-DE)
+    const options = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
+    const dateStrFormatted = d.toLocaleString('de-DE', options) + ' Uhr';
+
+    doc.text(`Datum: ${dateStrFormatted}`, 20, 30);
     doc.text(`Kategorie: ${catName}`, 20, 35);
 
     doc.setFontSize(12);
