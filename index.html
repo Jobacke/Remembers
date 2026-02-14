@@ -278,7 +278,34 @@
           </div>
         </div>
         <div class="form-group">
-          <label class="form-label" for="note-transcript">Transkript (bearbeitbar)</label>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <label class="form-label" for="note-transcript" style="margin-bottom:0;">Transkript (bearbeitbar)</label>
+            <button id="toggle-terms-inline" class="btn btn-sm btn-secondary" style="font-size:11px; padding:2px 8px;">+
+              Fachbegriff</button>
+          </div>
+
+          <div id="inline-terms-container" class="hidden"
+            style="margin-bottom:8px; padding:8px; background:var(--bg-elevated); border-radius:var(--radius-md); border:1px solid var(--border);">
+            <div class="search-container" style="margin-bottom: 8px; position: relative;">
+              <input id="inline-term-search" type="text" class="search-input" placeholder="Wort suchen..."
+                style="width:100%;padding:8px;font-size:13px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+              <div id="inline-term-action" class="hidden"
+                style="position:absolute; right:4px; top:50%; transform:translateY(-50%);">
+                <button id="inline-use-term-btn" class="btn btn-sm btn-secondary"
+                  style="padding:2px 6px; font-size:11px;">Übernehmen</button>
+              </div>
+            </div>
+            <div style="display:flex; gap:4px;">
+              <input id="inline-term-wrong" type="text" class="term-input" placeholder="Falsch"
+                style="flex:1; padding:6px; font-size:13px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+              <input id="inline-term-correct" type="text" class="term-input" placeholder="Richtig"
+                style="flex:1; padding:6px; font-size:13px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+              <button id="inline-add-term-btn" class="btn btn-primary" style="padding:6px 10px;">+</button>
+            </div>
+            <div id="inline-terms-status"
+              style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>
+          </div>
+
           <textarea id="note-transcript" class="form-input textarea"
             placeholder="Hier erscheint der erkannte Text..."></textarea>
         </div>
@@ -440,7 +467,7 @@
   <!-- ========== TOAST CONTAINER ========== -->
   <div id="version-overlay"
     style="position: fixed; bottom: 8px; right: 8px; font-size: 13px; font-weight: bold; color: rgba(255,255,255,0.8); background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 9999;">
-    v4.0.1</div>
+    v4.0.2</div>
   <div id="toast-container" class="toast-container"></div>
 
   <!-- ========== SCRIPTS ========== -->

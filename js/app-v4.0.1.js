@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.1';
+const APP_VERSION = '4.0.2';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -350,6 +350,16 @@ const els = {
     transcriptPlaceholder: $('#transcript-placeholder'),
     transcriptText: $('#transcript-text'),
     noteTranscript: $('#note-transcript'),
+    // Inline Terms
+    toggleTermsInline: $('#toggle-terms-inline'),
+    inlineTermsContainer: $('#inline-terms-container'),
+    inlineTermSearch: $('#inline-term-search'),
+    inlineTermAction: $('#inline-term-action'),
+    inlineUseTermBtn: $('#inline-use-term-btn'),
+    inlineTermWrong: $('#inline-term-wrong'),
+    inlineTermCorrect: $('#inline-term-correct'),
+    inlineAddTermBtn: $('#inline-add-term-btn'),
+    inlineTermsStatus: $('#inline-terms-status'),
 };
 
 // ============================================================
@@ -2566,6 +2576,73 @@ function initTermsEvents() {
                 // Hide button, but search remains in search box to explain why list is empty
                 els.termSearchAction.classList.add('hidden');
             }
+        });
+    }
+
+    // Inline Terms Logic
+    if (els.toggleTermsInline) {
+        els.toggleTermsInline.addEventListener('click', () => {
+            els.inlineTermsContainer.classList.toggle('hidden');
+            if (!els.inlineTermsContainer.classList.contains('hidden')) {
+                if (els.inlineTermSearch) els.inlineTermSearch.focus();
+            }
+        });
+    }
+
+    if (els.inlineTermSearch) {
+        els.inlineTermSearch.addEventListener('input', () => {
+            const val = els.inlineTermSearch.value.trim().toLowerCase();
+            // Simple check if already exists
+            if (state.technicalTerms[val]) {
+                els.inlineTermsStatus.textContent = `Bereits bekannt als: ${state.technicalTerms[val]}`;
+                els.inlineTermsStatus.style.color = 'var(--text-muted)';
+                els.inlineTermAction.classList.add('hidden');
+            } else {
+                els.inlineTermsStatus.textContent = '';
+                if (val) {
+                    els.inlineTermAction.classList.remove('hidden');
+                } else {
+                    els.inlineTermAction.classList.add('hidden');
+                }
+            }
+        });
+    }
+
+    if (els.inlineUseTermBtn) {
+        els.inlineUseTermBtn.addEventListener('click', () => {
+            els.inlineTermWrong.value = els.inlineTermSearch.value.trim();
+            els.inlineTermCorrect.focus();
+            els.inlineTermAction.classList.add('hidden');
+        });
+    }
+
+    if (els.inlineAddTermBtn) {
+        els.inlineAddTermBtn.addEventListener('click', () => {
+            const wrong = els.inlineTermWrong.value.trim().toLowerCase();
+            const correct = els.inlineTermCorrect.value.trim();
+
+            if (!wrong || !correct) {
+                els.inlineTermsStatus.textContent = 'Bitte beides ausfüllen';
+                els.inlineTermsStatus.style.color = 'var(--error)';
+                return;
+            }
+
+            // Save
+            state.technicalTerms[wrong] = correct;
+            saveTechnicalTerms();
+
+            // Feedback
+            els.inlineTermsStatus.textContent = `Gespeichert: ${wrong} -> ${correct}`;
+            els.inlineTermsStatus.style.color = 'var(--success)';
+
+            // Clear
+            els.inlineTermWrong.value = '';
+            els.inlineTermCorrect.value = '';
+            els.inlineTermSearch.value = '';
+            els.inlineTermAction.classList.add('hidden');
+
+            // Refresh main list just in case
+            renderTermsList();
         });
     }
 }
