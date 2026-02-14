@@ -69,6 +69,25 @@ Tippe einfach auf den **Stift ✏️ neben dem Titel** der Notiz, um ihn direkt 
 
 ---
 
+## 📚 Fachbegriffe & Korrekturen
+
+Die App lernt dazu! Du kannst häufig falsch verstandene Wörter (z.B. medizinische Abkürzungen wie "RTW", "NEF" oder "Viggo") hinterlegen.
+
+### Fachbegriffe verwalten
+- Gehe ins **Menü (Profilbild)** -> **"Fachbegriffe verwalten"**.
+- Dort siehst du eine Liste aller hinterlegten Korrekturen.
+- Du kannst neue hinzufügen (z.B. Falsch: "rtw", Richtig: "RTW") oder alte löschen.
+- Diese Begriffe werden bei **jeder neuen Aufnahme automatisch korrigiert**.
+
+### Direkt beim Bearbeiten korrigieren
+Wenn du im Text einen Fehler entdeckst (z.B. "vigo" statt "Viggo"):
+1. Tippe im Bearbeiten-Fenster auf den Button **"+ Fachbegriff"**.
+2. Gib das falsche und das richtige Wort ein (oder suche erst danach).
+3. Tippe auf **+**.
+4. Der Begriff wird für die Zukunft gespeichert **UND** in der aktuellen Notiz sofort überall korrigiert!
+
+---
+
 ## 📱 Installation (Apple User)
 
 Für das beste Erlebnis auf dem iPhone:

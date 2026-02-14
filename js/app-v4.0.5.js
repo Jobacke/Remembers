@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.4';
+const APP_VERSION = '4.0.5';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -80,6 +80,28 @@ Sie fügt <strong>automatisch</strong> einen freundlichen Begrüßungstext für 
     <li><strong>PDF:</strong> Tippe auf das <strong>PDF-Symbol</strong>, um eine schön formatierte Datei mit Datum, Kategorie und Text zu erstellen. Perfekt zum Ausdrucken oder Weiterleiten.</li>
     <li><strong>Teilen:</strong> Über das <strong>Teilen-Symbol</strong> kannst du den Text der Notiz direkt in WhatsApp, Mail oder andere Apps kopieren.</li>
 </ul>
+
+<hr style="margin:32px 0;border:0;border-top:1px solid var(--border);">
+
+<h2 style="font-size:1.5rem;margin-bottom:16px;">📚 Fachbegriffe & Korrekturen</h2>
+<p>Die App lernt dazu! Du kannst häufig falsch verstandene Wörter (z.B. medizinische Abkürzungen wie "RTW", "NEF" oder "Viggo") hinterlegen.</p>
+
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Fachbegriffe verwalten</h3>
+<ul style="padding-left:20px;margin-top:8px;">
+    <li>Gehe ins <strong>Menü (Profilbild)</strong> -> <strong>"Fachbegriffe verwalten"</strong>.</li>
+    <li>Dort siehst du eine Liste aller hinterlegten Korrekturen.</li>
+    <li>Du kannst neue hinzufügen (z.B. Falsch: "rtw", Richtig: "RTW") oder alte löschen.</li>
+    <li>Diese Begriffe werden bei <strong>jeder neuen Aufnahme automatisch korrigiert</strong>.</li>
+</ul>
+
+<h3 style="font-size:1.1rem;margin-top:24px;margin-bottom:8px;">Direkt beim Bearbeiten korrigieren</h3>
+<p>Wenn du im Text einen Fehler entdeckst (z.B. "vigo" statt "Viggo"):</p>
+<ol style="padding-left:20px;margin-top:8px;">
+    <li>Tippe im Bearbeiten-Fenster auf den Button <strong>"+ Fachbegriff"</strong>.</li>
+    <li>Gib das falsche und das richtige Wort ein (oder suche erst danach).</li>
+    <li>Tippe auf <strong>+</strong>.</li>
+    <li>Der Begriff wird für die Zukunft gespeichert <strong>UND</strong> in der aktuellen Notiz sofort überall korrigiert!</li>
+</ol>
 
 <hr style="margin:32px 0;border:0;border-top:1px solid var(--border);">
 
