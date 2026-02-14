@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.26';
+const APP_VERSION = '3.1.27';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -2043,6 +2043,9 @@ async function handleForgotPassword() {
 }
 
 function bindEvents() {
+    // Terms
+    initTermsEvents();
+
     // Auth Listeners
     if (els.loginGoogleBtn) els.loginGoogleBtn.addEventListener('click', handleGoogleLogin);
     if (els.authForm) els.authForm.addEventListener('submit', handleAuthSubmit);
