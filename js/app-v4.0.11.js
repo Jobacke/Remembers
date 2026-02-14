@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.10';
+const APP_VERSION = '4.0.11';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -344,6 +344,7 @@ const els = {
     // Terms Modal
     termsModal: $('#terms-modal'),
     termsModalClose: $('#terms-modal-close'),
+    termsCount: $('#terms-count'),
     termsList: $('#terms-list'),
     termWrong: $('#term-wrong'),
     termCorrect: $('#term-correct'),
@@ -2567,6 +2568,11 @@ function renderTermsList() {
     const filter = els.termSearch ? els.termSearch.value.trim().toLowerCase() : '';
 
     const terms = Object.entries(state.technicalTerms);
+
+    // Update count
+    if (els.termsCount) {
+        els.termsCount.textContent = `(${terms.length})`;
+    }
 
     // Sort terms
     terms.sort((a, b) => a[0].localeCompare(b[0]));
