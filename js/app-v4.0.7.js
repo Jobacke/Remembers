@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.6';
+const APP_VERSION = '4.0.7';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -1007,29 +1007,30 @@ function toggleTranscriptEdit(noteId) {
     editor.addEventListener('click', e => e.stopPropagation());
 
     editor.innerHTML = `
-        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
-            <button class="btn-toggle-terms" style="font-size:11px; padding:3px 8px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; color:var(--text-secondary);">+ Fachbegriff</button>
+        <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
+            <button class="btn-toggle-terms" style="font-size:13px; padding:6px 12px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; color:var(--text-secondary);">+ Fachbegriff</button>
         </div>
         
-        <div class="inline-terms-container hidden" style="margin-bottom:8px; padding:8px; background:var(--bg-elevated); border-radius:var(--radius-md); border:1px solid var(--border);">
-             <div style="margin-bottom: 8px; position: relative;">
-                  <input class="term-search" type="text" placeholder="Wort suchen..." style="width:100%;padding:6px;font-size:12px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
-                  <div class="term-action hidden" style="position:absolute; right:4px; top:50%; transform:translateY(-50%);">
-                    <button class="btn-use-term" style="padding:2px 6px; font-size:10px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer;color:var(--text-primary);">Als "Falsch"</button>
+        <div class="inline-terms-container hidden" style="margin-bottom:12px; padding:12px; background:var(--bg-elevated); border-radius:var(--radius-md); border:1px solid var(--border);">
+             <div style="margin-bottom: 12px; position: relative;">
+                  <input class="term-search" type="text" placeholder="Wort suchen..." style="width:100%;padding:10px;font-size:16px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+                  <div class="term-action hidden" style="position:absolute; right:6px; top:50%; transform:translateY(-50%);">
+                    <button class="btn-use-term" style="padding:6px 10px; font-size:12px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer;color:var(--text-primary);">Als "Falsch"</button>
                   </div>
              </div>
-             <div style="display:flex; gap:4px;">
-                  <input class="term-wrong" type="text" placeholder="Falsch" style="flex:1; padding:6px; font-size:12px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
-                  <input class="term-correct" type="text" placeholder="Richtig" style="flex:1; padding:6px; font-size:12px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
-                  <button class="btn-add-term" style="padding:4px 8px; font-size:12px; background:var(--primary); border:none; border-radius:var(--radius-sm); cursor:pointer; color:var(--text-on-primary, black);">+</button>
+             
+             <div style="display:flex; flex-direction:column; gap:8px;">
+                  <input class="term-wrong" type="text" placeholder="Falsch" style="padding:10px; font-size:16px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+                  <input class="term-correct" type="text" placeholder="Richtig" style="padding:10px; font-size:16px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+                  <button class="btn-add-term" style="width:100%; padding:10px; font-size:14px; font-weight:600; background:var(--primary); border:none; border-radius:var(--radius-sm); cursor:pointer; color:var(--text-on-primary, black);">Hinzufügen (+)</button>
              </div>
-             <div class="terms-status" style="font-size:10px; color:var(--text-muted); margin-top:4px; min-height:14px;"></div>
+             <div class="terms-status" style="font-size:12px; color:var(--text-muted); margin-top:8px; min-height:16px;"></div>
         </div>
 
-        <textarea style="width:100%;min-height:100px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text-primary);font-family:inherit;resize:vertical;font-size:14px;line-height:1.5;">${escapeHtml(currentText)}</textarea>
+        <textarea style="width:100%;min-height:100px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text-primary);font-family:inherit;resize:vertical;font-size:16px;line-height:1.5;">${escapeHtml(currentText)}</textarea>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
-            <button class="btn-cancel" style="padding:4px 8px;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-secondary);">Abbrechen</button>
-            <button class="btn-save" style="padding:4px 8px;font-size:12px;background:var(--primary);border:none;border-radius:var(--radius-sm);cursor:pointer;color:var(--text-on-primary, black);">Speichern</button>
+            <button class="btn-cancel" style="padding:6px 12px;font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-secondary);">Abbrechen</button>
+            <button class="btn-save" style="padding:6px 12px;font-size:13px;background:var(--primary);border:none;border-radius:var(--radius-sm);cursor:pointer;color:var(--text-on-primary, black);">Speichern</button>
         </div>
     `;
 

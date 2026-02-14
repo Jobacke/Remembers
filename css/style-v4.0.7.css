@@ -1869,7 +1869,9 @@ img {
 
 .note-title-input:focus {
   border-bottom-color: var(--primary);
-}/* ============================================================
+}
+
+/* ============================================================
    TECHNICAL TERMS MODAL
    ============================================================ */
 .terms-list {
@@ -1932,10 +1934,14 @@ img {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   color: var(--text-primary);
-  font-size: 0.9rem;
+  font-size: 16px;
 }
 
 .term-input:focus {
   border-color: var(--primary);
   outline: none;
 }
+.search-input {
+  font-size: 16px;
+}
+
