@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.28';
+const APP_VERSION = '3.1.29';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -155,6 +155,7 @@ import {
     addDoc,
     getDocs,
     getDoc,
+    setDoc,
     deleteDoc,
     doc,
     updateDoc,
