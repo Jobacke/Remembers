@@ -364,6 +364,17 @@
           Füge Wörter hinzu, die oft falsch verstanden werden.
         </p>
 
+        <div class="search-container" style="margin-bottom: 12px; position: relative;">
+          <input id="term-search" type="text" class="search-input" placeholder="Suchen..."
+            style="width:100%;padding:10px;border-radius:var(--radius-md);border:1px solid var(--border);background:var(--bg-elevated);color:var(--text-primary);">
+          <div id="term-search-action" class="hidden"
+            style="position:absolute; right:8px; top:50%; transform:translateY(-50%);">
+            <button id="use-search-term-btn" class="btn btn-sm btn-secondary" style="padding:4px 8px; font-size:12px;">
+              Als "Falsch" übernehmen
+            </button>
+          </div>
+        </div>
+
         <div id="terms-list" class="terms-list">
           <!-- Dynamically populated -->
         </div>
@@ -428,7 +439,7 @@
   <!-- ========== TOAST CONTAINER ========== -->
   <div id="version-overlay"
     style="position: fixed; bottom: 8px; right: 8px; font-size: 13px; font-weight: bold; color: rgba(255,255,255,0.8); background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 9999;">
-    v3.1.30</div>
+    v3.1.31</div>
   <div id="toast-container" class="toast-container"></div>
 
   <!-- ========== SCRIPTS ========== -->

@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.30';
+const APP_VERSION = '3.1.31';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -326,6 +326,9 @@ const els = {
     termWrong: $('#term-wrong'),
     termCorrect: $('#term-correct'),
     addTermBtn: $('#add-term-btn'),
+    termSearch: $('#term-search'),
+    termSearchAction: $('#term-search-action'),
+    useSearchTermBtn: $('#use-search-term-btn'),
     // Confirm
     confirmDialog: $('#confirm-dialog'),
     confirmIcon: $('#confirm-icon'),
@@ -2423,14 +2426,25 @@ function renderTermsList() {
     const list = els.termsList;
     list.innerHTML = '';
 
+    // Check if search exists
+    const filter = els.termSearch ? els.termSearch.value.trim().toLowerCase() : '';
+
     const terms = Object.entries(state.technicalTerms);
 
-    if (terms.length === 0) {
-        list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Keine Fachbegriffe definiert.</div>';
-        return;
-    }
+    // Sort terms
+    terms.sort((a, b) => a[0].localeCompare(b[0]));
+
+    let visibleCount = 0;
 
     terms.forEach(([wrong, correct]) => {
+        // Filter
+        if (filter) {
+            if (!wrong.toLowerCase().includes(filter) && !correct.toLowerCase().includes(filter)) {
+                return;
+            }
+        }
+        visibleCount++;
+
         const item = document.createElement('div');
         item.className = 'term-item';
         item.innerHTML = `
@@ -2457,7 +2471,21 @@ function renderTermsList() {
 
         list.appendChild(item);
     });
+
+    if (visibleCount === 0) {
+        if (filter) {
+            list.innerHTML = `<div style="text-align:center;padding:20px;color:var(--text-muted);">Kein Treffer für "${escapeHtml(filter)}".</div>`;
+            if (els.termSearchAction) els.termSearchAction.classList.remove('hidden');
+        } else {
+            list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Keine Fachbegriffe definiert.</div>';
+            if (els.termSearchAction) els.termSearchAction.classList.add('hidden');
+        }
+    } else {
+        if (els.termSearchAction) els.termSearchAction.classList.add('hidden');
+    }
 }
+
+
 
 function addTerm() {
     const wrong = els.termWrong.value.trim().toLowerCase();
@@ -2478,6 +2506,8 @@ function addTerm() {
     // Clear inputs
     els.termWrong.value = '';
     els.termCorrect.value = '';
+    if (els.termSearch) els.termSearch.value = ''; // Clear search
+
     els.termWrong.focus();
 
     // Render & Save
@@ -2517,6 +2547,26 @@ function initTermsEvents() {
 
     if (els.addTermBtn) {
         els.addTermBtn.addEventListener('click', addTerm);
+    }
+
+    // Search events
+    if (els.termSearch) {
+        els.termSearch.addEventListener('input', () => {
+            renderTermsList();
+        });
+    }
+
+    if (els.useSearchTermBtn) {
+        els.useSearchTermBtn.addEventListener('click', () => {
+            const searchVal = els.termSearch.value.trim();
+            if (searchVal) {
+                els.termWrong.value = searchVal;
+                // Focus correct input
+                els.termCorrect.focus();
+                // Hide button, but search remains in search box to explain why list is empty
+                els.termSearchAction.classList.add('hidden');
+            }
+        });
     }
 }
 
