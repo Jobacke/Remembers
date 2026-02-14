@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.3';
+const APP_VERSION = '4.0.4';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -981,7 +981,29 @@ function toggleTranscriptEdit(noteId) {
     const editor = document.createElement('div');
     editor.className = 'transcript-editor-container';
 
+    // Stop propagation on clicks inside user interface
+    editor.addEventListener('click', e => e.stopPropagation());
+
     editor.innerHTML = `
+        <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+            <button class="btn-toggle-terms" style="font-size:11px; padding:3px 8px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; color:var(--text-secondary);">+ Fachbegriff</button>
+        </div>
+        
+        <div class="inline-terms-container hidden" style="margin-bottom:8px; padding:8px; background:var(--bg-elevated); border-radius:var(--radius-md); border:1px solid var(--border);">
+             <div style="margin-bottom: 8px; position: relative;">
+                  <input class="term-search" type="text" placeholder="Wort suchen..." style="width:100%;padding:6px;font-size:12px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+                  <div class="term-action hidden" style="position:absolute; right:4px; top:50%; transform:translateY(-50%);">
+                    <button class="btn-use-term" style="padding:2px 6px; font-size:10px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer;color:var(--text-primary);">Als "Falsch"</button>
+                  </div>
+             </div>
+             <div style="display:flex; gap:4px;">
+                  <input class="term-wrong" type="text" placeholder="Falsch" style="flex:1; padding:6px; font-size:12px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+                  <input class="term-correct" type="text" placeholder="Richtig" style="flex:1; padding:6px; font-size:12px;border-radius:var(--radius-sm);border:1px solid var(--border);color:var(--text-primary);background:var(--bg);">
+                  <button class="btn-add-term" style="padding:4px 8px; font-size:12px; background:var(--primary); border:none; border-radius:var(--radius-sm); cursor:pointer; color:var(--text-on-primary, black);">+</button>
+             </div>
+             <div class="terms-status" style="font-size:10px; color:var(--text-muted); margin-top:4px; min-height:14px;"></div>
+        </div>
+
         <textarea style="width:100%;min-height:100px;background:var(--surface-sunken);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px;color:var(--text-primary);font-family:inherit;resize:vertical;font-size:14px;line-height:1.5;">${escapeHtml(currentText)}</textarea>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:8px;">
             <button class="btn-cancel" style="padding:4px 8px;font-size:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);cursor:pointer;color:var(--text-secondary);">Abbrechen</button>
@@ -995,11 +1017,85 @@ function toggleTranscriptEdit(noteId) {
     const textarea = editor.querySelector('textarea');
     textarea.focus();
 
-    textarea.addEventListener('click', e => e.stopPropagation());
+    // -- Terms Logic --
+    const termsContainer = editor.querySelector('.inline-terms-container');
+    const toggleBtn = editor.querySelector('.btn-toggle-terms');
+    const termSearch = editor.querySelector('.term-search');
+    const termAction = editor.querySelector('.term-action');
+    const btnUseTerm = editor.querySelector('.btn-use-term');
+    const termWrong = editor.querySelector('.term-wrong');
+    const termCorrect = editor.querySelector('.term-correct');
+    const btnAddTerm = editor.querySelector('.btn-add-term');
+    const status = editor.querySelector('.terms-status');
+
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        termsContainer.classList.toggle('hidden');
+        if (!termsContainer.classList.contains('hidden')) termSearch.focus();
+    });
+
+    termSearch.addEventListener('input', (e) => {
+        e.stopPropagation();
+        const val = termSearch.value.trim().toLowerCase();
+        if (state.technicalTerms[val]) {
+            status.textContent = `Bereits bekannt: ${state.technicalTerms[val]}`;
+            status.style.color = 'var(--text-muted)';
+            termAction.classList.add('hidden');
+        } else {
+            status.textContent = '';
+            if (val) termAction.classList.remove('hidden');
+            else termAction.classList.add('hidden');
+        }
+    });
+
+    // Prevent clicks in inputs from closing card
+    [termSearch, termWrong, termCorrect].forEach(el => el.addEventListener('click', e => e.stopPropagation()));
+
+    btnUseTerm.addEventListener('click', (e) => {
+        e.stopPropagation();
+        termWrong.value = termSearch.value.trim();
+        termCorrect.focus();
+        termAction.classList.add('hidden');
+    });
+
+    btnAddTerm.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const w = termWrong.value.trim().toLowerCase();
+        const c = termCorrect.value.trim();
+        if (!w || !c) {
+            status.textContent = 'Beides ausfüllen';
+            status.style.color = 'var(--error)';
+            return;
+        }
+
+        // Save
+        state.technicalTerms[w] = c;
+        saveTechnicalTerms();
+
+        // Correct in textarea
+        const current = textarea.value;
+        const escW = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const reg = new RegExp(`\\b${escW}\\b`, 'gi');
+        const matchCount = (current.match(reg) || []).length;
+
+        if (matchCount > 0) {
+            textarea.value = current.replace(reg, c);
+            status.textContent = `Gespeichert & ${matchCount}x korrigiert: ${w} -> ${c}`;
+        } else {
+            status.textContent = `Gespeichert: ${w} -> ${c}`;
+        }
+        status.style.color = 'var(--success)';
+
+        // Clear
+        termWrong.value = '';
+        termCorrect.value = '';
+        termSearch.value = '';
+        termAction.classList.add('hidden');
+    });
 
     editor.querySelector('.btn-cancel').addEventListener('click', (e) => {
         e.stopPropagation();
-        contentDiv.innerHTML = escapeHtml(note.transcript);
+        contentDiv.innerHTML = escapeHtml(note.transcript).replace(/\n\n/g, '\n');
     });
 
     editor.querySelector('.btn-save').addEventListener('click', async (e) => {
