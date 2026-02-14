@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.27';
+const APP_VERSION = '3.1.28';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -623,11 +623,12 @@ async function loadTechnicalTerms() {
 async function saveTechnicalTerms() {
     try {
         const docRef = doc(db, 'users', state.user.uid, 'settings', 'vocabulary');
-        await setDoc(docRef, { terms: state.technicalTerms }, { merge: true });
+        // We overwrite the document to ensure deleted terms are removed from Firestore
+        await setDoc(docRef, { terms: state.technicalTerms });
         showToast('Fachbegriffe gespeichert', 'success');
     } catch (e) {
         console.error('Error saving terms:', e);
-        showToast('Fehler beim Speichern', 'error');
+        showToast('Fehler beim Speichern: ' + e.message, 'error');
     }
 }
 
