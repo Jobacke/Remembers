@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.8';
+const APP_VERSION = '4.0.9';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -2467,6 +2467,14 @@ async function initApp(user) {
             c.color = '#EAB308';
         }
     });
+
+    // Default Filter: JUH
+    const juhCat = state.categories.find(c => c.name === 'JUH');
+    if (juhCat) {
+        state.activeFilter = juhCat.id;
+        state.selectedCategoryId = juhCat.id;
+        filterNotes();
+    }
 
     // Render
     renderCategoryFilter();
