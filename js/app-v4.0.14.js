@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.13';
+const APP_VERSION = '4.0.14';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -1362,14 +1362,23 @@ async function startRecording() {
         });
 
         // Set up audio analyser for visualizer
-        // Ensure old context is gone
-        if (state.audioContext && state.audioContext.state !== 'closed') {
-            await state.audioContext.close().catch(e => console.error(e));
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+
+        // Reuse context if available (Singleton pattern)
+        if (!state.audioContext || state.audioContext.state === 'closed') {
+            try {
+                // Ensure no old one lingers (just safe check)
+                if (state.audioContext) state.audioContext.close().catch(() => { });
+                state.audioContext = new AudioContext();
+            } catch (e) {
+                console.error('Context creation failed', e);
+            }
         }
 
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        state.audioContext = new AudioContext();
-        await state.audioContext.resume(); // Ensure context is running (iOS requirement)
+        // Resume context on iOS (critical after suspend/pause)
+        if (state.audioContext.state === 'suspended') {
+            await state.audioContext.resume().catch(e => console.warn('Resume warning:', e));
+        }
 
         const source = state.audioContext.createMediaStreamSource(state.mediaStream);
         state.analyserNode = state.audioContext.createAnalyser();
@@ -1452,18 +1461,16 @@ function stopRecording() {
                 state.mediaStream = null;
             }
 
-            // Close audio context
-            if (state.audioContext) {
-                const ctx = state.audioContext;
-                state.audioContext = null;
+            // Suspend audio context instead of closing (Singleton pattern for iOS)
+            if (state.audioContext && state.audioContext.state !== 'closed') {
+                try {
+                    state.audioContext.suspend().catch(e => console.warn('Context suspend warning:', e));
+                } catch (e) {
+                    console.warn(e);
+                }
+                // Keep context alive, but reset analyser reference to force recreation or just leave it?
+                // Better to nullify analyserNode so we know to recreate it attached to new source
                 state.analyserNode = null;
-
-                // Slight delay before closing to ensure tracks are fully stopped by browser
-                setTimeout(() => {
-                    if (ctx.state !== 'closed') {
-                        ctx.close().catch(e => console.warn('Context close warning:', e));
-                    }
-                }, 100);
             }
 
             // Clear timer
