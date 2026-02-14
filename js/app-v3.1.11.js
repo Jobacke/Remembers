@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.24';
+const APP_VERSION = '3.1.26';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -134,7 +134,7 @@ window.onerror = function (msg, url, line, col, error) {
     }
 };
 
-import { firebaseConfig, DEFAULT_CATEGORIES, CATEGORY_COLORS, CATEGORY_ICONS } from './config.js';
+import { firebaseConfig, DEFAULT_CATEGORIES, CATEGORY_COLORS, CATEGORY_ICONS, TECHNICAL_TERMS_MAPPING } from './config.js';
 
 // Firebase SDK Imports (from CDN)
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-app.js';
@@ -240,7 +240,9 @@ const state = {
     selectedCategoryId: null,
     // Offline
     isOffline: !navigator.onLine,
-    uploadQueue: []
+    uploadQueue: [],
+    // Fachbegriffe
+    technicalTerms: { ...TECHNICAL_TERMS_MAPPING }
 };
 
 
@@ -274,6 +276,7 @@ const els = {
     userMenuName: $('#user-menu-name'),
     userMenuEmail: $('#user-menu-email'),
     btnManageCategories: $('#btn-manage-categories'),
+    btnManageTerms: $('#btn-manage-terms'),
     btnFaq: $('#btn-faq'),
     btnLogout: $('#btn-logout'),
     // Notes
@@ -311,6 +314,17 @@ const els = {
     iconPicker: $('#icon-picker'),
     categoryCancelBtn: $('#category-cancel-btn'),
     categorySaveBtn: $('#category-save-btn'),
+    // FAQ Modal
+    faqModal: $('#faq-modal'),
+    faqContent: $('#faq-content'),
+    faqModalClose: $('#faq-modal-close'),
+    // Terms Modal
+    termsModal: $('#terms-modal'),
+    termsModalClose: $('#terms-modal-close'),
+    termsList: $('#terms-list'),
+    termWrong: $('#term-wrong'),
+    termCorrect: $('#term-correct'),
+    addTermBtn: $('#add-term-btn'),
     // Confirm
     confirmDialog: $('#confirm-dialog'),
     confirmIcon: $('#confirm-icon'),
@@ -587,6 +601,33 @@ async function loadCategories() {
     } catch (error) {
         console.error('Error loading categories:', error);
         showToast('Fehler beim Laden der Kategorien', 'error');
+    }
+}
+
+async function loadTechnicalTerms() {
+    try {
+        const docRef = doc(db, 'users', state.user.uid, 'settings', 'vocabulary');
+        const docSnap = await getDoc(docRef);
+
+        if (docSnap.exists() && docSnap.data().terms) {
+            state.technicalTerms = docSnap.data().terms;
+        } else {
+            state.technicalTerms = { ...TECHNICAL_TERMS_MAPPING };
+        }
+    } catch (e) {
+        console.warn('Technical terms load error (offline?):', e);
+        // Fallback to defaults already in state
+    }
+}
+
+async function saveTechnicalTerms() {
+    try {
+        const docRef = doc(db, 'users', state.user.uid, 'settings', 'vocabulary');
+        await setDoc(docRef, { terms: state.technicalTerms }, { merge: true });
+        showToast('Fachbegriffe gespeichert', 'success');
+    } catch (e) {
+        console.error('Error saving terms:', e);
+        showToast('Fehler beim Speichern', 'error');
     }
 }
 
@@ -1111,6 +1152,15 @@ async function startRecording() {
                         // Using word boundaries \b to avoid matching inside other words
                         text = text.replace(/\bzeile\b/gi, '\n');
                         text = text.replace(/\babsatz\b/gi, '\n\n');
+
+                        // Fachbegriffe korrigieren
+                        for (const [wrong, correct] of Object.entries(TECHNICAL_TERMS_MAPPING)) {
+                            // Erstelle Regex für das falsche Wort (case insensitive, word boundaries)
+                            // Escape special regex chars in 'wrong' just in case, though usually simple words
+                            const escapedWrong = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                            const regex = new RegExp(`\\b${escapedWrong}\\b`, 'gi');
+                            text = text.replace(regex, correct);
+                        }
 
                         // Clean up potential double newlines if trimmed
                         // If text became ONLY whitespace/newlines, we keep it?
@@ -2266,7 +2316,7 @@ async function initApp(user) {
     els.userMenuEmail.textContent = user.email || '';
 
     // Load data
-    await Promise.all([loadCategories(), loadNotes()]);
+    await Promise.all([loadCategories(), loadNotes(), loadTechnicalTerms()]);
 
     // Color Migration (visual only, for old purple data)
     state.categories.forEach(c => {
@@ -2354,6 +2404,111 @@ async function main() {
         } catch (e) {
             console.warn('SW registration failed:', e);
         }
+    }
+}
+
+// ============================================================
+// TECHNICAL TERMS MANAGEMENT
+// ============================================================
+
+function renderTermsList() {
+    const list = els.termsList;
+    list.innerHTML = '';
+
+    const terms = Object.entries(state.technicalTerms);
+
+    if (terms.length === 0) {
+        list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);">Keine Fachbegriffe definiert.</div>';
+        return;
+    }
+
+    terms.forEach(([wrong, correct]) => {
+        const item = document.createElement('div');
+        item.className = 'term-item';
+        item.innerHTML = `
+            <div class="term-item-info">
+                <div style="display:flex;align-items:center;">
+                    <span class="term-wrong">${escapeHtml(wrong)}</span>
+                    <span class="term-arrow">➜</span>
+                    <span class="term-correct">${escapeHtml(correct)}</span>
+                </div>
+            </div>
+            <div class="term-actions">
+                <button class="note-action-btn delete" title="Löschen">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                    </svg>
+                </button>
+            </div>
+        `;
+
+        // Delete handler
+        item.querySelector('.delete').addEventListener('click', () => {
+            deleteTerm(wrong);
+        });
+
+        list.appendChild(item);
+    });
+}
+
+function addTerm() {
+    const wrong = els.termWrong.value.trim().toLowerCase();
+    const correct = els.termCorrect.value.trim();
+
+    if (!wrong || !correct) {
+        showToast('Bitte beides ausfüllen', 'error');
+        return;
+    }
+
+    if (state.technicalTerms[wrong]) {
+        if (!confirm(`Der Begriff "${wrong}" existiert bereits. Überschreiben?`)) return;
+    }
+
+    // Update state
+    state.technicalTerms[wrong] = correct;
+
+    // Clear inputs
+    els.termWrong.value = '';
+    els.termCorrect.value = '';
+    els.termWrong.focus();
+
+    // Render & Save
+    renderTermsList();
+    saveTechnicalTerms();
+}
+
+function deleteTerm(wrong) {
+    if (confirm(`"${wrong}" wirklich löschen?`)) {
+        delete state.technicalTerms[wrong];
+        renderTermsList();
+        saveTechnicalTerms();
+    }
+}
+
+// Event Listeners for Terms
+function initTermsEvents() {
+    if (els.btnManageTerms) {
+        els.btnManageTerms.addEventListener('click', () => {
+            if (els.userMenu) els.userMenu.classList.remove('active');
+            renderTermsList();
+            openModal(els.termsModal);
+        });
+    }
+
+    if (els.termsModalClose) {
+        els.termsModalClose.addEventListener('click', () => {
+            closeModal(els.termsModal);
+        });
+    }
+
+    if (els.termsModal) {
+        els.termsModal.addEventListener('click', (e) => {
+            if (e.target === els.termsModal) closeModal(els.termsModal);
+        });
+    }
+
+    if (els.addTermBtn) {
+        els.addTermBtn.addEventListener('click', addTerm);
     }
 }
 

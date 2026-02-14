@@ -36,3 +36,26 @@ export const CATEGORY_ICONS = [
     '📝', '💼', '🏠', '💡', '⏰', '🎯', '📚', '🎵',
     '🏥', '🛒', '✈️', '🎓', '💪', '🍽️', '🔧', '📱'
 ];
+
+// Automatische Korrektur von Fachbegriffen
+// Format: "falsch verstandenes Wort": "korrekter Fachbegriff"
+// Groß-/Kleinschreibung des Schlüssels ist egal (wird im Code behandelt)
+export const TECHNICAL_TERMS_MAPPING = {
+    // Rettungsdienst / Medizin Beispiele
+    'r t w': 'RTW',
+    'rtw': 'RTW',
+    'n e f': 'NEF',
+    'nef': 'NEF',
+    'k t w': 'KTW',
+    'ktw': 'KTW',
+    'akkon': 'Akkon',
+    'acon': 'Akkon',
+    'rea': 'Reanimation',
+    'vigo': 'Viggo',
+    'sauerstoff': 'O₂',
+    'o2': 'O₂',
+    'ek g': 'EKG',
+    'ekg': 'EKG',
+    'acs': 'ACS',
+    'z n': 'Z.n.'
+};

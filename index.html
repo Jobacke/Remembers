@@ -161,6 +161,15 @@
           </svg>
           Kategorien verwalten
         </button>
+        <button id="btn-manage-terms" class="user-menu-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <polyline points="4 7 4 4 20 4 20 7"></polyline>
+            <line x1="9" y1="20" x2="15" y2="20"></line>
+            <line x1="12" y1="4" x2="12" y2="20"></line>
+          </svg>
+          Fachbegriffe
+        </button>
         <button id="btn-faq" class="user-menu-item">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
             stroke-linejoin="round">
@@ -336,6 +345,44 @@
     </div>
   </div>
 
+  <!-- ========== TERMS MODAL ========== -->
+  <div id="terms-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2 class="modal-title">Fachbegriffe</h2>
+        <button id="terms-modal-close" class="modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div style="padding: 0 4px 20px 4px;">
+        <p style="color:var(--text-muted);font-size:0.9rem;margin-bottom:16px;">
+          Füge Wörter hinzu, die oft falsch verstanden werden.
+        </p>
+
+        <div id="terms-list" class="terms-list">
+          <!-- Dynamically populated -->
+        </div>
+
+        <div
+          style="background:var(--bg-elevated);padding:12px;border-radius:var(--radius-md);border:1px solid var(--border);">
+          <h3 style="font-size:0.9rem;margin-bottom:8px;color:var(--text-secondary);">Neuer Begriff</h3>
+          <div class="term-input-group">
+            <input id="term-wrong" type="text" class="term-input" placeholder="Falsches Wort (z.B. rtw)">
+          </div>
+          <div class="term-input-group">
+            <input id="term-correct" type="text" class="term-input" placeholder="Korrekter Begriff (z.B. RTW)">
+          </div>
+          <button id="add-term-btn" class="btn btn-primary" style="width:100%;">Hinzufügen</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ========== FAQ MODAL ========== -->
   <div id="faq-modal" class="modal-overlay">
     <div class="modal">
@@ -381,7 +428,7 @@
   <!-- ========== TOAST CONTAINER ========== -->
   <div id="version-overlay"
     style="position: fixed; bottom: 8px; right: 8px; font-size: 13px; font-weight: bold; color: rgba(255,255,255,0.8); background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 9999;">
-    v3.1.24</div>
+    v3.1.26</div>
   <div id="toast-container" class="toast-container"></div>
 
   <!-- ========== SCRIPTS ========== -->

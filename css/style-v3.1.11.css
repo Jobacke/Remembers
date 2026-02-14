@@ -1869,4 +1869,73 @@ img {
 
 .note-title-input:focus {
   border-bottom-color: var(--primary);
+}/* ============================================================
+   TECHNICAL TERMS MODAL
+   ============================================================ */
+.terms-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-height: 400px;
+  overflow-y: auto;
+  margin-bottom: var(--space-md);
+}
+
+.term-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+
+.term-item-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.term-wrong {
+  color: var(--danger);
+  font-size: 0.85rem;
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.term-arrow {
+  color: var(--text-muted);
+  margin: 0 4px;
+}
+
+.term-correct {
+  color: var(--success);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.term-actions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.term-input-group {
+  display: flex;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+}
+
+.term-input {
+  flex: 1;
+  padding: 10px;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.term-input:focus {
+  border-color: var(--primary);
+  outline: none;
 }

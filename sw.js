@@ -1,4 +1,4 @@
-const CACHE_NAME = 'sprachnotizen-v3.1.24';
+const CACHE_NAME = 'sprachnotizen-v3.1.26';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
