@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.2';
+const APP_VERSION = '4.0.3';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -2631,8 +2631,24 @@ function initTermsEvents() {
             state.technicalTerms[wrong] = correct;
             saveTechnicalTerms();
 
-            // Feedback
-            els.inlineTermsStatus.textContent = `Gespeichert: ${wrong} -> ${correct}`;
+            // Correct existing transcript immediately
+            const currentTranscript = els.noteTranscript.value;
+            const escapedWrong = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`\\b${escapedWrong}\\b`, 'gi');
+
+            // Check if matches exist
+            const matchCount = (currentTranscript.match(regex) || []).length;
+
+            if (matchCount > 0) {
+                const newTranscript = currentTranscript.replace(regex, correct);
+                els.noteTranscript.value = newTranscript;
+                // Feedback
+                els.inlineTermsStatus.textContent = `Gespeichert & ${matchCount}x korrigiert: ${wrong} -> ${correct}`;
+            } else {
+                // Feedback only
+                els.inlineTermsStatus.textContent = `Gespeichert: ${wrong} -> ${correct}`;
+            }
+
             els.inlineTermsStatus.style.color = 'var(--success)';
 
             // Clear
