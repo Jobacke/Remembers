@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.9';
+const APP_VERSION = '4.0.10';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -49,7 +49,7 @@ const FAQ_HTML = `
 <p>Wenn du eine Notiz in der Kategorie <strong>"JUH"</strong> speicherst, prüft die App den Text.
 Sie fügt <strong>automatisch</strong> einen freundlichen Begrüßungstext für die nachfolgende Schicht oder die Wache hinzu, falls dieser noch nicht vorhanden ist:</p>
 <blockquote style="border-left:4px solid var(--primary);padding-left:16px;margin:16px 0;font-style:italic;color:var(--text-primary);">
-    "Liebe RD-Besatzung! Wir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt. Vielen Dank für Eure Unterstützung! Herzliche Grüße Johannes"
+    "Liebe RD-Besatzung! Wir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt. Vielen Dank für Eure Unterstützung! Herzliche Grüße Eure RD-Kolleginnen und Kollegen"
 </blockquote>
 <p>Das spart dir Zeit beim Diktieren von Materialanforderungen!</p>
 
@@ -563,7 +563,7 @@ async function uploadAudioToStorage(audioBlob, basePath) {
 function applyCategoryTemplate(transcript, categoryId) {
     const cat = state.categories.find(c => c.id === categoryId);
     if (cat && cat.name === 'JUH') {
-        const prefix = "Liebe RD-Besatzung!\nWir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt.\nVielen Dank für Eure Unterstützung!\nHerzliche Grüße Johannes\n\n";
+        const prefix = "Liebe RD-Besatzung!\nWir sind jetzt auf dem Weg zur Wache und würden uns freuen, wenn ihr folgendes Material bereits zum Auffüllen bereitlegt.\nVielen Dank für Eure Unterstützung!\nHerzliche Grüße Eure RD-Kolleginnen und Kollegen\n\n";
         if (transcript && !transcript.startsWith('Liebe RD-Besatzung')) {
             return prefix + transcript;
         }
