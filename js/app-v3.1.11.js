@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '3.1.29';
+const APP_VERSION = '3.1.30';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -1156,9 +1156,12 @@ async function startRecording() {
                         text = text.replace(/\babsatz\b/gi, '\n\n');
 
                         // Fachbegriffe korrigieren
-                        for (const [wrong, correct] of Object.entries(TECHNICAL_TERMS_MAPPING)) {
+                        const termsToUse = state.technicalTerms && Object.keys(state.technicalTerms).length > 0
+                            ? state.technicalTerms
+                            : TECHNICAL_TERMS_MAPPING;
+
+                        for (const [wrong, correct] of Object.entries(termsToUse)) {
                             // Erstelle Regex für das falsche Wort (case insensitive, word boundaries)
-                            // Escape special regex chars in 'wrong' just in case, though usually simple words
                             const escapedWrong = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                             const regex = new RegExp(`\\b${escapedWrong}\\b`, 'gi');
                             text = text.replace(regex, correct);
