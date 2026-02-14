@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.12';
+const APP_VERSION = '4.0.13';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -1362,7 +1362,15 @@ async function startRecording() {
         });
 
         // Set up audio analyser for visualizer
-        state.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // Ensure old context is gone
+        if (state.audioContext && state.audioContext.state !== 'closed') {
+            await state.audioContext.close().catch(e => console.error(e));
+        }
+
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        state.audioContext = new AudioContext();
+        await state.audioContext.resume(); // Ensure context is running (iOS requirement)
+
         const source = state.audioContext.createMediaStreamSource(state.mediaStream);
         state.analyserNode = state.audioContext.createAnalyser();
         state.analyserNode.fftSize = 256;
@@ -1446,11 +1454,16 @@ function stopRecording() {
 
             // Close audio context
             if (state.audioContext) {
-                if (state.audioContext.state !== 'closed') {
-                    state.audioContext.close().catch(console.error);
-                }
+                const ctx = state.audioContext;
                 state.audioContext = null;
                 state.analyserNode = null;
+
+                // Slight delay before closing to ensure tracks are fully stopped by browser
+                setTimeout(() => {
+                    if (ctx.state !== 'closed') {
+                        ctx.close().catch(e => console.warn('Context close warning:', e));
+                    }
+                }, 100);
             }
 
             // Clear timer
