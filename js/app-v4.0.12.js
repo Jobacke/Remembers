@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.11';
+const APP_VERSION = '4.0.12';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -1441,11 +1441,16 @@ function stopRecording() {
             // Stop the media stream
             if (state.mediaStream) {
                 state.mediaStream.getTracks().forEach(track => track.stop());
+                state.mediaStream = null;
             }
 
             // Close audio context
             if (state.audioContext) {
-                state.audioContext.close();
+                if (state.audioContext.state !== 'closed') {
+                    state.audioContext.close().catch(console.error);
+                }
+                state.audioContext = null;
+                state.analyserNode = null;
             }
 
             // Clear timer
