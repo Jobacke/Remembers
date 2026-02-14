@@ -7,7 +7,7 @@
 // ============================================================
 
 export const firebaseConfig = {
-    apiKey: "AIzaSyA2Ggdj9gCh652IL3O3ivDAJfjF73hZkgE",
+    apiKey: "AIzaSyA6c5RTBQimXF1nNIeuzmzCY-5jLg9jX18",
     authDomain: "sprachnotizen-app.firebaseapp.com",
     projectId: "sprachnotizen-app",
     storageBucket: "sprachnotizen-app.firebasestorage.app",
