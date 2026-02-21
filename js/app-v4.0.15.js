@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.15';
+const APP_VERSION = '4.0.17';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -2164,8 +2164,22 @@ async function handleAuthSubmit(e) {
                 console.error('Error sending verification email:', err);
                 showToast('Konto erstellt, aber Bestätigungs-E-Mail konnte nicht gesendet werden.', 'error');
             }
+            // Sign out implicitly so they have to verify first
+            await signOut(auth);
+
+            // Switch back to login mode
+            if (state.isRegistering) {
+                toggleAuthMode();
+            }
+            els.loginError.textContent = 'Bitte bestätige deine E-Mail-Adresse, bevor du dich einloggst.';
+            els.loginError.classList.remove('hidden');
         } else {
-            await signInWithEmailAndPassword(auth, email, password);
+            const userCredential = await signInWithEmailAndPassword(auth, email, password);
+            if (!userCredential.user.emailVerified) {
+                await signOut(auth);
+                els.loginError.textContent = 'Bitte bestätige zuerst deine E-Mail-Adresse über den Link in deinem Posteingang.';
+                els.loginError.classList.remove('hidden');
+            }
         }
     } catch (error) {
         console.error('Auth Error:', error);
@@ -2579,7 +2593,7 @@ async function main() {
 
     // Listen for auth state changes
     onAuthStateChanged(auth, async (user) => {
-        if (user) {
+        if (user && user.emailVerified) {
             await initApp(user);
         } else {
             state.user = null;
