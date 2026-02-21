@@ -12,14 +12,9 @@ class MyTranscriptionPipeline {
 
     static async getInstance(progress_callback = null) {
         if (this.instance === null) {
-            // Attempt to instantiate the pipeline, opting into WebGPU if available, falling back to WASM
+            // Instantiate the pipeline with default safe fallbacks (WASM) for max browser compatibility
             this.instance = await pipeline(this.task, this.model, {
-                progress_callback,
-                device: 'webgpu', // Try WebGPU first for 10x speedup
-                dtype: {
-                    encoder_model: 'fp32', // fp32 has better accuracy
-                    decoder_model_merged: 'q8', // q8 exists for Xenova models ('q4' does not and hangs)
-                }
+                progress_callback
             });
         }
         return this.instance;
