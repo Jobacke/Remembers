@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.14';
+const APP_VERSION = '4.0.15';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -580,13 +580,9 @@ async function handleLogin() {
     try {
         els.loginError.classList.add('hidden');
         // Try popup first, fall back to redirect for iOS PWA
-        const isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
-            window.navigator.standalone === true;
-        if (isStandalone) {
-            await signInWithRedirect(auth, googleProvider);
-        } else {
-            await signInWithPopup(auth, googleProvider);
-        }
+        // Try popup first (even on standalone) because cross-domain redirect fails
+        // on iOS/macOS PWAs due to Intelligent Tracking Prevention (ITP)
+        await signInWithPopup(auth, googleProvider);
     } catch (error) {
         console.error('Login error:', error);
         // If popup blocked, try redirect
