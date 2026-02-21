@@ -2195,7 +2195,7 @@ function toggleAuthMode() {
 async function handleForgotPassword() {
     const email = els.authEmail.value.trim();
     if (!email) {
-        els.loginError.textContent = 'Bitte gib deine E-Mail-Adresse ein, um das Passwort zurückzusetzen.';
+        els.loginError.textContent = 'Bitte gib deine E-Mail-Adresse ein und klicke erneut auf Passwort vergessen.';
         els.loginError.classList.remove('hidden');
         return;
     }
