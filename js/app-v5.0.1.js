@@ -2085,8 +2085,12 @@ async function runWhisperTranscription(blob) {
         whisperWorker = new Worker('/js/whisper-worker.js', { type: 'module' });
         whisperWorker.onmessage = (e) => {
             const data = e.data;
-            if (data.status === 'loading') {
+            if (data.status === 'init') {
+                els.noteTranscript.value = `Initialisiere KI-Kern...`;
+            } else if (data.status === 'loading') {
                 els.noteTranscript.value = 'Lade lokales KI-Sprachmodell... (Einmalig)';
+            } else if (data.status === 'ready') {
+                els.noteTranscript.value = 'KI-Modell im Arbeitsspeicher geladen. Starte Transkription...';
             } else if (data.status === 'processing') {
                 els.noteTranscript.value = 'KI transkribiert Text lokal...';
             } else if (data.status === 'complete') {
