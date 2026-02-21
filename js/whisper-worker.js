@@ -12,9 +12,11 @@ class MyTranscriptionPipeline {
 
     static async getInstance(progress_callback = null) {
         if (this.instance === null) {
-            // Instantiate the pipeline with default safe fallbacks (WASM) for max browser compatibility
+            // Force quantization and WASM explicit config to prevent hanging on Safari
             this.instance = await pipeline(this.task, this.model, {
-                progress_callback
+                progress_callback,
+                device: 'wasm',
+                dtype: 'q8' // Enforce q8 quantized globally to prevent OOM/compile hangs
             });
         }
         return this.instance;
@@ -27,20 +29,17 @@ self.addEventListener('message', async (event) => {
 
     if (type === 'transcribe') {
         try {
-            // Load the model
-            postMessage({ status: 'loading' });
+            postMessage({ status: 'init' });
             let transcriber = await MyTranscriptionPipeline.getInstance(x => {
                 postMessage(x); // send progress updates
             });
 
             postMessage({ status: 'processing' });
 
-            // Generate transcription
+            // Generate transcription without forcing chunk_length which can cause infinite loops
             let result = await transcriber(audio, {
                 language: 'german',
                 task: 'transcribe',
-                chunk_length_s: 30,
-                stride_length_s: 5,
             });
 
             postMessage({
