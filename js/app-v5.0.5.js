@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.0.4';
+const APP_VERSION = '5.0.5';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -2076,61 +2076,6 @@ function showCategoryForm(category = null) {
     renderIconPicker();
 }
 
-let whisperWorker = null;
-
-async function runWhisperTranscription(blob) {
-    if (!window.Worker) return;
-
-    if (!whisperWorker) {
-        whisperWorker = new Worker('/js/whisper-worker.js', { type: 'module' });
-        whisperWorker.onmessage = (e) => {
-            const data = e.data;
-            const baseText = state.transcript.trim() ? state.transcript.trim() + '\n\n' : '';
-
-            if (data.status === 'init') {
-                els.noteTranscript.value = baseText + `[Initialisiere KI-Kern...]`;
-            } else if (data.status === 'loading') {
-                els.noteTranscript.value = baseText + '[Lade lokales KI-Sprachmodell... (Einmalig)]';
-            } else if (data.status === 'ready') {
-                els.noteTranscript.value = baseText + '[KI-Modell geladen. Starte Transkription...]';
-            } else if (data.status === 'processing') {
-                els.noteTranscript.value = baseText + '[KI transkribiert Text lokal...]';
-            } else if (data.status === 'complete') {
-                els.noteTranscript.value = data.text.trim() || state.transcript.trim();
-                els.saveBtn.disabled = false;
-                els.saveBtn.style.opacity = '1';
-                showToast('Lokale Transkription abgeschlossen!', 'success');
-            } else if (data.status === 'error') {
-                els.noteTranscript.value = state.transcript.trim() || 'Fehler bei lokaler KI. Bitte manuell eingeben.';
-                els.saveBtn.disabled = false;
-                els.saveBtn.style.opacity = '1';
-                console.error(data.error);
-            } else if (data.progress !== undefined) {
-                els.noteTranscript.value = baseText + `[Modell wird geladen... ${Math.round(data.progress)}%]`;
-            }
-        };
-    }
-
-    try {
-        els.saveBtn.disabled = true;
-        els.saveBtn.style.opacity = '0.5';
-        const baseText = state.transcript.trim() ? state.transcript.trim() + '\n\n' : '';
-        els.noteTranscript.value = baseText + '[Bereite lokale KI-Transkription vor...]';
-
-        const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-        const arrayBuffer = await blob.arrayBuffer();
-        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-        const pcm = audioBuffer.getChannelData(0); // Float32Array
-
-        whisperWorker.postMessage({ type: 'transcribe', audio: pcm });
-    } catch (e) {
-        console.error("Audio Decode Error for Whisper:", e);
-        els.saveBtn.disabled = false;
-        els.saveBtn.style.opacity = '1';
-        els.noteTranscript.value = state.transcript.trim();
-    }
-}
-
 function showSaveForm() {
     if (!state.audioBlob) {
         showToast('Keine Aufnahme vorhanden', 'error');
@@ -2141,9 +2086,8 @@ function showSaveForm() {
     els.saveForm.classList.remove('hidden');
     renderCategorySelect();
 
-    // Fill text area with captured transcript initially, then override with Whisper
+    // Fill text area with captured transcript
     els.noteTranscript.value = state.transcript.trim();
-    runWhisperTranscription(state.audioBlob);
 
     els.noteTitle.focus();
 }
