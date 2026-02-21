@@ -1,10 +1,13 @@
-import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.0';
+import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
 
-// Disable sending telemetry
+// Disable local models, enable cache
 env.allowLocalModels = false;
 env.useBrowserCache = true;
+// Force single thread to prevent Safari SharedArrayBuffer hangs
+if (env.backends && env.backends.onnx && env.backends.onnx.wasm) {
+    env.backends.onnx.wasm.numThreads = 1;
+}
 
-// Create a class to manage pipeline loading
 class MyTranscriptionPipeline {
     static task = 'automatic-speech-recognition';
     static model = 'Xenova/whisper-tiny';
@@ -12,11 +15,9 @@ class MyTranscriptionPipeline {
 
     static async getInstance(progress_callback = null) {
         if (this.instance === null) {
-            // Force quantization and WASM explicit config to prevent hanging on Safari
             this.instance = await pipeline(this.task, this.model, {
                 progress_callback,
-                device: 'wasm',
-                dtype: 'q8' // Enforce q8 quantized globally to prevent OOM/compile hangs
+                quantized: true // v2 syntax for quantized models
             });
         }
         return this.instance;
@@ -36,10 +37,12 @@ self.addEventListener('message', async (event) => {
 
             postMessage({ status: 'processing' });
 
-            // Generate transcription without forcing chunk_length which can cause infinite loops
+            // Generate transcription
             let result = await transcriber(audio, {
                 language: 'german',
                 task: 'transcribe',
+                chunk_length_s: 30, // Safe in v2
+                stride_length_s: 5,
             });
 
             postMessage({
