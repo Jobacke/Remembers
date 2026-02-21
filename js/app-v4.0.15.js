@@ -2125,7 +2125,17 @@ async function handleGoogleLogin() {
         await signInWithPopup(auth, googleProvider);
     } catch (error) {
         console.error('Google Login Error:', error);
-        els.loginError.textContent = error.message;
+
+        let msg = 'Google Login fehlgeschlagen.';
+        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+            msg = 'Du hast das Login-Fenster geschlossen, bevor die Anmeldung abgeschlossen war.';
+        } else if (error.code === 'auth/popup-blocked') {
+            msg = 'Das Login-Fenster wurde vom Browser blockiert. Bitte Popups zulassen.';
+        } else {
+            msg += ' ' + error.message;
+        }
+
+        els.loginError.textContent = msg;
         els.loginError.classList.remove('hidden');
     }
 }
@@ -2196,7 +2206,13 @@ async function handleForgotPassword() {
         els.loginError.classList.add('hidden');
     } catch (error) {
         console.error('Reset Password Error:', error);
-        els.loginError.textContent = 'Fehler beim Senden der E-Mail (ungültige Adresse?).';
+        let msg = 'Fehler beim Senden der E-Mail (evtl. ungültige Adresse?).';
+        if (error.code === 'auth/user-not-found') {
+            msg = 'Es gibt kein Konto mit dieser E-Mail-Adresse.';
+        } else if (error.code === 'auth/invalid-email') {
+            msg = 'Die eingegebene E-Mail-Adresse ist ungültig.';
+        }
+        els.loginError.textContent = msg;
         els.loginError.classList.remove('hidden');
     }
 }
