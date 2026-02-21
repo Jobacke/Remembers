@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '4.0.17';
+const APP_VERSION = '4.0.18';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -2173,12 +2173,18 @@ async function handleAuthSubmit(e) {
             }
             els.loginError.textContent = 'Bitte bestätige deine E-Mail-Adresse, bevor du dich einloggst.';
             els.loginError.classList.remove('hidden');
+            return;
         } else {
             const userCredential = await signInWithEmailAndPassword(auth, email, password);
+
+            // Force reload before checking verified state to ensure it's not cached
+            await userCredential.user.reload();
+
             if (!userCredential.user.emailVerified) {
                 await signOut(auth);
                 els.loginError.textContent = 'Bitte bestätige zuerst deine E-Mail-Adresse über den Link in deinem Posteingang.';
                 els.loginError.classList.remove('hidden');
+                return;
             }
         }
     } catch (error) {
@@ -2593,15 +2599,24 @@ async function main() {
 
     // Listen for auth state changes
     onAuthStateChanged(auth, async (user) => {
-        if (user && user.emailVerified) {
-            await initApp(user);
-        } else {
-            state.user = null;
-            state.categories = [];
-            state.notes = [];
-            stopPlayback();
-            showLogin();
+        if (user) {
+            try {
+                await user.reload();
+            } catch (e) {
+                // If it fails (e.g. network error), we just use the current state
+            }
+            if (user.emailVerified) {
+                await initApp(user);
+                return;
+            }
         }
+
+        // Unverified or not logged in
+        state.user = null;
+        state.categories = [];
+        state.notes = [];
+        stopPlayback();
+        showLogin();
     });
 
     // Register Service Worker
