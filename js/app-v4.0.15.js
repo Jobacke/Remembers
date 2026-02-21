@@ -169,6 +169,7 @@ import {
     createUserWithEmailAndPassword,
     signInWithEmailAndPassword,
     sendPasswordResetEmail,
+    sendEmailVerification,
     updateProfile
 } from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-auth.js';
 import {
@@ -2155,6 +2156,13 @@ async function handleAuthSubmit(e) {
             const userCredential = await createUserWithEmailAndPassword(auth, email, password);
             if (name) {
                 await updateProfile(userCredential.user, { displayName: name });
+            }
+            try {
+                await sendEmailVerification(userCredential.user);
+                showToast('Bestätigungs-E-Mail wurde gesendet. Bitte prüfe deinen Posteingang.', 'success');
+            } catch (err) {
+                console.error('Error sending verification email:', err);
+                showToast('Konto erstellt, aber Bestätigungs-E-Mail konnte nicht gesendet werden.', 'error');
             }
         } else {
             await signInWithEmailAndPassword(auth, email, password);
