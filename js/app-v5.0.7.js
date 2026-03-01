@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.0.6';
+const APP_VERSION = '5.0.7';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -384,6 +384,7 @@ const els = {
     inlineTermCorrect: $('#inline-term-correct'),
     inlineAddTermBtn: $('#inline-add-term-btn'),
     inlineTermsStatus: $('#inline-terms-status'),
+    summarizeBtn: $('#summarize-btn'),
 };
 
 // ============================================================
@@ -430,6 +431,73 @@ function showToast(message, type = 'info') {
     toast.innerHTML = `<span class="toast-icon">${icons[type]}</span> ${message}`;
     els.toastContainer.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
+}
+
+function summarizeMaterials(text) {
+    if (!text) return text;
+
+    const lines = text.split('\n');
+    let outLines = [];
+
+    for (let line of lines) {
+        if (!/\d/.test(line)) {
+            outLines.push(line);
+            continue;
+        }
+
+        let parts = line.split(/;/);
+        let itemMap = new Map();
+        let itemOrder = [];
+        let nonItems = [];
+
+        let regex = /^\s*(\d+)\s*(?:x\s*)?(.+?)\s*$/i;
+
+        for (let part of parts) {
+            part = part.trim();
+            if (!part) continue;
+
+            // Sub-split e.g. "2 x Laken 2 x Decken" -> ["2 x Laken", "2 x Decken"]
+            let subParts = part.split(/\s+(?=\d+\s*x\s+[A-Za-zÄÖÜäöüß]|\d+\s*(?:x\s*)?[A-ZÄÖÜ])/);
+
+            for (let sub of subParts) {
+                sub = sub.trim();
+                if (!sub) continue;
+
+                let match = sub.match(regex);
+                if (match) {
+                    let qty = parseInt(match[1], 10);
+                    let rawName = match[2].trim();
+                    let normName = rawName.toLowerCase().replace(/\s+/g, ' ');
+
+                    if (itemMap.has(normName)) {
+                        itemMap.get(normName).qty += qty;
+                    } else {
+                        itemMap.set(normName, { qty: qty, rawName: rawName });
+                        itemOrder.push(normName);
+                    }
+                } else {
+                    nonItems.push(sub);
+                }
+            }
+        }
+
+        if (itemOrder.length === 0) {
+            outLines.push(line);
+        } else {
+            let combined = [];
+            if (nonItems.length > 0) {
+                combined.push(nonItems.join('; '));
+            }
+            let summarizedItems = itemOrder.map(name => {
+                let item = itemMap.get(name);
+                return `${item.qty} x ${item.rawName}`;
+            });
+            combined.push(summarizedItems.join('; '));
+            outLines.push(combined.join('; '));
+        }
+    }
+
+    return outLines.join('\n');
 }
 
 // ============================================================
@@ -1005,7 +1073,8 @@ function toggleTranscriptEdit(noteId) {
     editor.addEventListener('click', e => e.stopPropagation());
 
     editor.innerHTML = `
-        <div style="display:flex; justify-content:flex-end; margin-bottom:8px;">
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:8px;">
+            <button class="btn-summarize-inline" style="font-size:13px; padding:6px 12px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; color:var(--text-secondary);" title="Materialien zusammenzählen">✨ Aufsummieren</button>
             <button class="btn-toggle-terms" style="font-size:13px; padding:6px 12px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); cursor:pointer; color:var(--text-secondary);">+ Fachbegriff</button>
         </div>
         
@@ -1113,6 +1182,21 @@ function toggleTranscriptEdit(noteId) {
         termSearch.value = '';
         termAction.classList.add('hidden');
     });
+
+    const btnSummarize = editor.querySelector('.btn-summarize-inline');
+    if (btnSummarize) {
+        btnSummarize.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const text = textarea.value;
+            const summarized = summarizeMaterials(text);
+            if (text !== summarized) {
+                textarea.value = summarized;
+                showToast('Mengen erfolgreich zusammengefasst!', 'success');
+            } else {
+                showToast('Keine aufsummierbaren Mengen gefunden.', 'info');
+            }
+        });
+    }
 
     editor.querySelector('.btn-cancel').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -2337,6 +2421,17 @@ function bindEvents() {
         els.saveForm.classList.add('hidden');
         els.recordSection.classList.remove('hidden');
         els.transcriptPreview.classList.remove('hidden'); // Show preview again
+    });
+
+    els.summarizeBtn.addEventListener('click', () => {
+        const text = els.noteTranscript.value;
+        const summarized = summarizeMaterials(text);
+        if (text !== summarized) {
+            els.noteTranscript.value = summarized;
+            showToast('Mengen erfolgreich zusammengefasst!', 'success');
+        } else {
+            showToast('Keine aufsummierbaren Mengen gefunden.', 'info');
+        }
     });
 
     els.saveBtn.addEventListener('click', async () => {
