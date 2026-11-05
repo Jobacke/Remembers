@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.1.4';
+const APP_VERSION = '5.1.5';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -468,6 +468,7 @@ function summarizeMaterials(text) {
     if (!text) return text;
 
     // First pass: convert number words ("fünf Decken" -> "5 x Decken") and normalize "5xDecken" -> "5 x Decken"
+    // while keeping measurement units like "8 cm Mullbinde" without 'x'
     let prepared = applyMedicalPostProcessing(text);
 
     const lines = prepared.split('\n');
@@ -475,6 +476,7 @@ function summarizeMaterials(text) {
     const bodyLines = [];
     let foundFirstItemLine = false;
 
+    const UNIT_WORDS = /^(?:cm|mm|m|km|ml|l|dl|cl|mg|g|kg|µg|mcg|ug|ie|i\.e\.|iu|ch|charri[eè]re|gauge|zoll|uhr|min|sek|std|h|grad|prozent|%|bar|mmhg|mmol|liter|milliliter|gramm|milligramm|mikrogramm|zentimeter|millimeter|meter)\b/i;
     const hasQuantityPattern = (str) => /\b\d+\s*(?:[xX×]|mal)?\s*[A-Za-zÄÖÜäöüß]{2,}/i.test(str);
 
     for (const line of lines) {
@@ -495,28 +497,52 @@ function summarizeMaterials(text) {
     const itemOrder = [];
     const nonItems = [];
 
-    // Match e.g. "5 x Decken", "5xDecken", "5 Decken", "2 mal Laken"
-    const itemRegex = /^\s*(\d+)\s*(?:(?:[xX×]|mal)\s*)*([A-Za-zÄÖÜäöüß].*?)\s*$/i;
+    // Explicit quantity: e.g. "5 x Decken", "2 x 8 cm Mullbinde", "5xDecken"
+    const explicitQtyRegex = /^\s*(\d+)\s*(?:[xX×]|mal)\s*(.+?)\s*$/i;
+    // Implicit quantity: e.g. "5 Decken" (where the word after the number is NOT a unit like "cm" or "ml")
+    const implicitQtyRegex = /^\s*(\d+)\s+([A-Za-zÄÖÜäöüß].*?)\s*$/i;
 
     const fullBody = bodyLines.join('; ');
-    // Split by ';', ',', ' und ' (before a digit), or whitespace before a new '<digit> x <word>' / '<digit> <CapitalWord>'
+    // Split by ';', ',', ' und ' (before a digit), or whitespace before a new '<digit> x <word>'
     const rawParts = fullBody
-        .split(/;|,|\s+\bund\b\s+(?=\d)|\s+(?=\d+\s*(?:[xX×]|mal)\s*[A-Za-zÄÖÜäöüß]|\d+\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß])/i);
+        .split(/;|,|\s+\bund\b\s+(?=\d)|\s+(?=\d+\s*(?:[xX×]|mal)\s*[A-Za-zÄÖÜäöüß0-9])/i);
 
     for (let part of rawParts) {
         part = part.replace(/[;,.]+$/, '').trim();
         if (!part) continue;
 
-        const match = part.match(itemRegex);
-        if (match) {
-            const qty = parseInt(match[1], 10);
-            const rawName = match[2].replace(/[;,.]+$/, '').trim();
-            const normName = rawName.toLowerCase().replace(/\s+/g, ' ');
+        let qty = null;
+        let rawName = null;
+        let hadExplicitQty = true;
 
+        const expMatch = part.match(explicitQtyRegex);
+        if (expMatch) {
+            qty = parseInt(expMatch[1], 10);
+            rawName = expMatch[2].replace(/[;,.]+$/, '').trim();
+        } else {
+            const impMatch = part.match(implicitQtyRegex);
+            if (impMatch) {
+                const candidateRest = impMatch[2].replace(/[;,.]+$/, '').trim();
+                if (UNIT_WORDS.test(candidateRest)) {
+                    // e.g. "8 cm Mullbinde" without leading "x" -> "8 cm Mullbinde" is the item name itself (qty 1)
+                    qty = 1;
+                    rawName = part;
+                    hadExplicitQty = false;
+                } else {
+                    qty = parseInt(impMatch[1], 10);
+                    rawName = candidateRest;
+                }
+            }
+        }
+
+        if (qty !== null && rawName) {
+            const normName = rawName.toLowerCase().replace(/\s+/g, ' ');
             if (itemMap.has(normName)) {
-                itemMap.get(normName).qty += qty;
+                const entry = itemMap.get(normName);
+                entry.qty += qty;
+                entry.hadExplicitQty = true;
             } else {
-                itemMap.set(normName, { qty, rawName });
+                itemMap.set(normName, { qty, rawName, hadExplicitQty });
                 itemOrder.push(normName);
             }
         } else {
@@ -535,6 +561,9 @@ function summarizeMaterials(text) {
 
     const summarizedItems = itemOrder.map(name => {
         const item = itemMap.get(name);
+        if (item.qty === 1 && !item.hadExplicitQty) {
+            return `${item.rawName}`;
+        }
         return `${item.qty} x ${item.rawName}`;
     });
     combinedBody.push(summarizedItems.join('; ') + ';');
@@ -968,6 +997,10 @@ async function saveNote(title, categoryId, audioBlob, duration, transcript, isSy
         });
 
         els.uploadOverlay.classList.add('hidden');
+        if (!isSync && navigator.onLine) {
+            triggerSeamlessReload('Notiz gespeichert!');
+            return;
+        }
         showToast('Notiz gespeichert!', 'success');
         await loadNotes();
         renderNotes();
@@ -1054,11 +1087,14 @@ async function appendNote(noteId, audioBlob, duration, transcript, isSync = fals
         });
 
         els.uploadOverlay.classList.add('hidden');
-        showToast('Aufnahme angehängt!', 'success');
-
-        // Reset Append State
         state.isAppending = false;
         state.appendingNoteId = null;
+
+        if (!isSync && navigator.onLine) {
+            triggerSeamlessReload('Aufnahme angehängt!');
+            return;
+        }
+        showToast('Aufnahme angehängt!', 'success');
 
         await loadNotes();
         renderNotes();
@@ -1488,6 +1524,8 @@ function applyMedicalPostProcessing(rawText) {
     text = text.replace(/\b(?:neuer\s+)?absatz\b/gi, '\n\n');
     text = text.replace(/\b(?:semikolon|strichpunkt)\b/gi, '; ');
 
+    const UNIT_LOOKAHEAD = '(?:cm|mm|m|km|ml|l|dl|cl|mg|g|kg|µg|mcg|ug|ie|i\\.e\\.|iu|ch|charri[eè]re|gauge|zoll|uhr|min|sek|std|h|grad|prozent|%|bar|mmhg|mmol|liter|milliliter|gramm|milligramm|mikrogramm|zentimeter|millimeter|meter|er|te|ten|ter)\\b';
+
     // 2. Number words before "mal" or "x" or medical items: e.g. "zwei mal" -> "2 x", "dreimal" -> "3 x"
     text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|fünfzehn|zwanzig)\s*(?:mal|x)\b/gi, (m, numWord) => {
         const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
@@ -1495,8 +1533,14 @@ function applyMedicalPostProcessing(rawText) {
     });
     text = text.replace(/\b(\d+)\s*(?:mal|x)\b/gi, '$1 x');
 
-    // Convert standalone number words followed by common medical supplies or uppercase nouns (e.g. "fünf Decken" -> "5 x Decken")
-    text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|fünfzehn|zwanzig)\s+(?!x\b|mal\b|uhr\b)(?=[A-ZÄÖÜ][a-zäöüß]+)/gi, (m, numWord) => {
+    // Convert number words before measurement units to digits WITHOUT "x" (e.g. "acht cm Mullbinde" -> "8 cm Mullbinde")
+    text = text.replace(new RegExp(`\\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|fünfzehn|zwanzig)\\s+(?=${UNIT_LOOKAHEAD})`, 'gi'), (m, numWord) => {
+        const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
+        return `${digit} `;
+    });
+
+    // Convert standalone number words followed by common medical supplies or nouns (e.g. "fünf Decken" -> "5 x Decken")
+    text = text.replace(new RegExp(`\\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|fünfzehn|zwanzig)\\s+(?!x\\b|mal\\b|${UNIT_LOOKAHEAD})(?=[A-ZÄÖÜa-zäöüß]{2,})`, 'gi'), (m, numWord) => {
         const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
         return `${digit} x `;
     });
@@ -1515,13 +1559,16 @@ function applyMedicalPostProcessing(rawText) {
         text = text.replace(regex, correct);
     }
 
-    // 4. Normalize all "<digit>x<Word>", "<digit> x x <Word>", "<digit> <Noun>" into "<digit> x <Word>"
+    // 4. Normalize "<digit>x<Word>", "<digit> x x <Word>", "<digit> <Noun>" into "<digit> x <Word>"
     text = text.replace(/\b(\d+)\s*(?:(?:[xX×]|mal)\s*)+(?=[A-Za-zÄÖÜäöüß])/gi, '$1 x ');
-    text = text.replace(/\b(\d+)\s+(?!(?:[xX×]|mal|uhr|min|sek|std|mg|ml|mcg|µg|g|kg|l|dl|cm|mm|m|km|grad|prozent|bar|er|te|ten|ter)\b)([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]{1,})/g, '$1 x $2');
+    text = text.replace(new RegExp(`\\b(\\d+)\\s+(?!(?:[xX×]|mal)\\b|${UNIT_LOOKAHEAD})([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]{1,})`, 'gi'), '$1 x $2');
     text = text.replace(/\b(\d+)\s*(?:[xX×]\s*){2,}/g, '$1 x ');
 
+    // Remove accidental "x" before measurement units (e.g. when "8" -> "8 x" is in custom terms: "8 x cm Mullbinde" -> "8 cm Mullbinde")
+    text = text.replace(new RegExp(`\\b(\\d+(?:[.,]\\d+)?)\\s*(?:[xX×]|mal)\\s*(?=${UNIT_LOOKAHEAD})`, 'gi'), '$1 ');
+
     // 5. Separate consecutive quantity items in one utterance with "; " (e.g. "5 x Decken 2 x Decken" or "5 x Decken und 2 x Decken" -> "5 x Decken; 2 x Decken")
-    text = text.replace(/([A-Za-zÄÖÜäöüß0-9%])\s*(?:,|;|\bund\b)?\s+(?=\d+\s*x\s+[A-Za-zÄÖÜäöüß])/gi, '$1; ');
+    text = text.replace(new RegExp(`(?<!\\bmal)([A-Za-zÄÖÜäöüß]{2,}|%)\\s*(?:,|;|\\bund\\b)?\\s+(?=\\d+\\s*(?:x\\s+[A-Za-zÄÖÜäöüß0-9]|${UNIT_LOOKAHEAD}\\s+[A-Za-zÄÖÜäöüß]{2,}))`, 'gi'), '$1; ');
 
     // 6. Clean up spacing around punctuation & newlines
     text = text.replace(/[ \t]+\n/g, '\n');
@@ -1692,6 +1739,23 @@ function releaseWakeLock() {
     }
 }
 
+// Automatically resets the iOS Safari / WebKit audio & speech recognition session after a completed recording
+// while preserving category filter, scroll position, and displaying the toast seamlessly.
+function triggerSeamlessReload(toastMessage = '') {
+    try {
+        if (state.activeFilter) {
+            sessionStorage.setItem('notizen_active_filter', state.activeFilter);
+        }
+        sessionStorage.setItem('notizen_scroll_y', String(window.scrollY || 0));
+        if (toastMessage) {
+            sessionStorage.setItem('notizen_toast', toastMessage);
+        }
+    } catch (e) { }
+    if (navigator.onLine) {
+        window.location.reload();
+    }
+}
+
 // ============================================================
 // AUDIO RECORDING
 // ============================================================
@@ -1701,6 +1765,7 @@ async function startRecording() {
         // Stop any active playback before recording
         stopPlayback();
 
+        state.hasUsedMicrophone = true;
         state.audioChunks = [];
         state.audioBlob = null;
         state.transcript = '';
@@ -2158,12 +2223,17 @@ function stopRecording() {
                     const actualMime = (state.mediaRecorder && state.mediaRecorder.mimeType) || 'audio/mp4';
                     state.audioBlob = new Blob(state.audioChunks, { type: actualMime });
                 }
+                if (state.mediaRecorder) {
+                    state.mediaRecorder.ondataavailable = null;
+                    state.mediaRecorder.onstop = null;
+                    state.mediaRecorder = null;
+                }
                 resolve(state.audioBlob);
             };
 
             // Set onstop to create the blob and resolve the promise
             state.mediaRecorder.onstop = () => {
-                const actualMime = state.mediaRecorder.mimeType || 'audio/mp4';
+                const actualMime = (state.mediaRecorder && state.mediaRecorder.mimeType) || 'audio/mp4';
                 state.audioBlob = new Blob(state.audioChunks, { type: actualMime });
                 finishResolve();
             };
@@ -2224,8 +2294,13 @@ function stopRecording() {
 }
 
 function discardRecording() {
+    const hadUsedMic = !!state.hasUsedMicrophone;
     stopRecording();
     resetRecordingUI();
+    if (hadUsedMic && navigator.onLine) {
+        closeModal(els.recordModal);
+        triggerSeamlessReload();
+    }
 }
 
 function resetRecordingUI() {
@@ -2740,6 +2815,8 @@ function openRecordModalForAppend(noteId) {
         return;
     }
     openRecordModal(true, noteId);
+    // Start recording immediately inside the user's tap gesture so supplementary text is captured right away!
+    startRecording();
 }
 
 function openRecordModal(isAppend = false, noteId = null) {
@@ -2784,12 +2861,16 @@ function openRecordModal(isAppend = false, noteId = null) {
     openModal(els.recordModal);
 }
 
-function closeRecordModal() {
+function closeRecordModal(isSaving = false) {
+    const hadUsedMic = !!state.hasUsedMicrophone;
     if (state.isRecording) {
         stopRecording();
     }
     resetRecordingUI();
     closeModal(els.recordModal);
+    if (!isSaving && hadUsedMic && navigator.onLine) {
+        triggerSeamlessReload();
+    }
 }
 
 function openCategoriesModal() {
@@ -3208,14 +3289,15 @@ function bindEvents() {
     els.fabRecord.addEventListener('click', openRecordModal);
 
     // Record Modal
-    els.recordModalClose.addEventListener('click', closeRecordModal);
+    els.recordModalClose.addEventListener('click', () => closeRecordModal(false));
     els.recordModal.addEventListener('click', (e) => {
-        if (e.target === els.recordModal) closeRecordModal();
+        if (e.target === els.recordModal) closeRecordModal(false);
     });
 
     els.recordBtn.addEventListener('click', async () => {
         if (state.isRecording) {
             await stopRecording();
+            showSaveForm();
         } else {
             startRecording();
         }
@@ -3264,7 +3346,7 @@ function bindEvents() {
         const transcript = els.noteTranscript.value.trim();
 
         if (state.isAppending && state.appendingNoteId) {
-            closeRecordModal();
+            closeRecordModal(true);
             await appendNote(state.appendingNoteId, blob, duration, transcript);
             return;
         }
@@ -3277,7 +3359,7 @@ function bindEvents() {
         const title = els.noteTitle.value.trim();
         const categoryId = state.selectedCategoryId;
 
-        closeRecordModal();
+        closeRecordModal(true);
         await saveNote(title, categoryId, blob, duration, transcript);
         renderCategoryFilter();
     });
@@ -3458,12 +3540,20 @@ async function initApp(user) {
         }
     });
 
-    // Default Filter: JUH
-    const juhCat = state.categories.find(c => c.name === 'JUH');
-    if (juhCat) {
-        state.activeFilter = juhCat.id;
-        state.selectedCategoryId = juhCat.id;
+    // Default Filter: JUH (or restore active filter from seamless reload)
+    const savedFilter = sessionStorage.getItem('notizen_active_filter');
+    if (savedFilter && (savedFilter === 'all' || state.categories.some(c => c.id === savedFilter))) {
+        state.activeFilter = savedFilter;
+        state.selectedCategoryId = savedFilter === 'all' ? (state.categories[0]?.id || null) : savedFilter;
+        sessionStorage.removeItem('notizen_active_filter');
         filterNotes();
+    } else {
+        const juhCat = state.categories.find(c => c.name === 'JUH');
+        if (juhCat) {
+            state.activeFilter = juhCat.id;
+            state.selectedCategoryId = juhCat.id;
+            filterNotes();
+        }
     }
 
     // Render
@@ -3474,6 +3564,20 @@ async function initApp(user) {
     els.loadingScreen.classList.add('hidden');
     els.loginScreen.classList.add('hidden');
     els.app.classList.remove('hidden');
+
+    // Restore scroll position & toast if triggered by seamless reload
+    try {
+        const savedScroll = sessionStorage.getItem('notizen_scroll_y');
+        if (savedScroll !== null) {
+            sessionStorage.removeItem('notizen_scroll_y');
+            window.scrollTo(0, parseInt(savedScroll, 10) || 0);
+        }
+        const savedToast = sessionStorage.getItem('notizen_toast');
+        if (savedToast) {
+            sessionStorage.removeItem('notizen_toast');
+            showToast(savedToast, 'success');
+        }
+    } catch (e) { }
 
     // Set Version
     const verEl = document.getElementById('app-version-display');
