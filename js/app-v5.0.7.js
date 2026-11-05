@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.1.2';
+const APP_VERSION = '5.1.3';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -1673,94 +1673,116 @@ async function startRecording() {
         els.transcriptPreview.classList.remove('hidden');
         if (els.aiTranscriptBadge) els.aiTranscriptBadge.classList.add('hidden');
 
-        // Keep screen awake during dictation
-        await acquireWakeLock();
+        // CRITICAL FOR iOS / SAFARI:
+        // SpeechRecognition.start() MUST be called synchronously inside the user's tap gesture handler
+        // BEFORE any `await` (like getUserMedia or wakeLock)!
+        // If called after `await`, iOS Safari drops the user-activation token and silently blocks speech recognition on subsequent recordings!
+        state.isRecording = true;
+        state.recordingStartTime = Date.now();
+        initLiveSpeechRecognition();
 
-        // 1. Request microphone access FIRST (prevents iOS/Safari permission race condition)
+        // Keep screen awake during dictation
+        acquireWakeLock();
+
+        // 1. Request microphone access (standard iOS-compatible constraints)
         state.mediaStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
-                autoGainControl: true,
-                channelCount: 1,
-                sampleRate: 48000
+                autoGainControl: true
             }
         });
 
-        // 2. Set up Web Audio API preprocessing pipeline (Noise Reduction + Voice Boost + Visualizer)
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-
-        if (!state.audioContext || state.audioContext.state === 'closed') {
-            try {
-                if (state.audioContext) state.audioContext.close().catch(() => { });
-                state.audioContext = new AudioContext();
-            } catch (e) {
-                console.error('Context creation failed', e);
-            }
+        // If user already cancelled while waiting for mic permission, abort cleanly
+        if (!state.isRecording) {
+            state.mediaStream.getTracks().forEach(t => t.stop());
+            state.mediaStream = null;
+            return;
         }
 
-        if (state.audioContext && state.audioContext.state === 'suspended') {
-            await state.audioContext.resume().catch(e => console.warn('Resume warning:', e));
-        }
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 
         let streamToRecord = state.mediaStream;
 
-        if (state.audioContext) {
-            const source = state.audioContext.createMediaStreamSource(state.mediaStream);
-            state.analyserNode = state.audioContext.createAnalyser();
-            state.analyserNode.fftSize = 256;
+        // CRITICAL FOR iOS / SAFARI:
+        // Do NOT create or attach WebAudio AudioContext / MediaStreamAudioSourceNode on iOS during recording!
+        // On iOS WebKit, attaching AudioContext to the mic stream and suspending/resuming it locks AVAudioSession
+        // and blocks Apple's SFSpeechRecognizer (webkitSpeechRecognition) on subsequent recordings!
+        if (!isIOS) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
 
-            if (state.aiSettings?.enableNoiseFilter !== false && state.audioContext.createMediaStreamDestination) {
+            if (!state.audioContext || state.audioContext.state === 'closed') {
                 try {
-                    // High-pass filter at 85 Hz: removes ambulance engine rumble, road noise & microphone handling thumps
-                    const highPass = state.audioContext.createBiquadFilter();
-                    highPass.type = 'highpass';
-                    highPass.frequency.value = 85;
-                    highPass.Q.value = 0.7;
+                    if (state.audioContext) state.audioContext.close().catch(() => { });
+                    state.audioContext = new AudioContext();
+                } catch (e) {
+                    console.error('Context creation failed', e);
+                }
+            }
 
-                    // Low-pass filter at 7500 Hz: removes high-frequency hiss & electronic whine
-                    const lowPass = state.audioContext.createBiquadFilter();
-                    lowPass.type = 'lowpass';
-                    lowPass.frequency.value = 7500;
-                    lowPass.Q.value = 0.7;
+            if (state.audioContext && state.audioContext.state === 'suspended') {
+                await state.audioContext.resume().catch(e => console.warn('Resume warning:', e));
+            }
 
-                    // Presence boost at 2800 Hz (+3 dB) for clear consonant & medical term articulation
-                    const presenceFilter = state.audioContext.createBiquadFilter();
-                    presenceFilter.type = 'peaking';
-                    presenceFilter.frequency.value = 2800;
-                    presenceFilter.Q.value = 1.0;
-                    presenceFilter.gain.value = 3.0;
+            if (state.audioContext) {
+                if (state.sourceNode) {
+                    try { state.sourceNode.disconnect(); } catch (e) { }
+                    state.sourceNode = null;
+                }
+                const source = state.audioContext.createMediaStreamSource(state.mediaStream);
+                state.sourceNode = source;
+                state.analyserNode = state.audioContext.createAnalyser();
+                state.analyserNode.fftSize = 256;
 
-                    // Dynamics Compressor: evens out volume differences and prevents clipping in loud environments
-                    const compressor = state.audioContext.createDynamicsCompressor();
-                    compressor.threshold.value = -24;
-                    compressor.knee.value = 30;
-                    compressor.ratio.value = 4;
-                    compressor.attack.value = 0.003;
-                    compressor.release.value = 0.25;
+                if (state.aiSettings?.enableNoiseFilter !== false && state.audioContext.createMediaStreamDestination) {
+                    try {
+                        const highPass = state.audioContext.createBiquadFilter();
+                        highPass.type = 'highpass';
+                        highPass.frequency.value = 85;
+                        highPass.Q.value = 0.7;
 
-                    const destination = state.audioContext.createMediaStreamDestination();
+                        const lowPass = state.audioContext.createBiquadFilter();
+                        lowPass.type = 'lowpass';
+                        lowPass.frequency.value = 7500;
+                        lowPass.Q.value = 0.7;
 
-                    source.connect(highPass);
-                    highPass.connect(presenceFilter);
-                    presenceFilter.connect(lowPass);
-                    lowPass.connect(compressor);
-                    compressor.connect(state.analyserNode);
-                    compressor.connect(destination);
+                        const presenceFilter = state.audioContext.createBiquadFilter();
+                        presenceFilter.type = 'peaking';
+                        presenceFilter.frequency.value = 2800;
+                        presenceFilter.Q.value = 1.0;
+                        presenceFilter.gain.value = 3.0;
 
-                    if (destination.stream && destination.stream.getAudioTracks().length > 0) {
-                        streamToRecord = destination.stream;
+                        const compressor = state.audioContext.createDynamicsCompressor();
+                        compressor.threshold.value = -24;
+                        compressor.knee.value = 30;
+                        compressor.ratio.value = 4;
+                        compressor.attack.value = 0.003;
+                        compressor.release.value = 0.25;
+
+                        const destination = state.audioContext.createMediaStreamDestination();
+
+                        source.connect(highPass);
+                        highPass.connect(presenceFilter);
+                        presenceFilter.connect(lowPass);
+                        lowPass.connect(compressor);
+                        compressor.connect(state.analyserNode);
+                        compressor.connect(destination);
+
+                        if (destination.stream && destination.stream.getAudioTracks().length > 0) {
+                            streamToRecord = destination.stream;
+                        }
+                    } catch (filterErr) {
+                        console.warn('Audio filter chain fallback to raw stream:', filterErr);
+                        source.connect(state.analyserNode);
                     }
-                } catch (filterErr) {
-                    console.warn('Audio filter chain fallback to raw stream:', filterErr);
+                } else {
                     source.connect(state.analyserNode);
                 }
-            } else {
-                source.connect(state.analyserNode);
             }
         }
 
-        // 3. Choose best supported MIME type with high-clarity bitrate (64 kbps)
+        // 3. Choose best supported MIME type
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
             ? 'audio/webm;codecs=opus'
             : MediaRecorder.isTypeSupported('audio/mp4')
@@ -1769,13 +1791,11 @@ async function startRecording() {
                     ? 'audio/ogg;codecs=opus'
                     : '';
 
-        const recorderOptions = mimeType ? { mimeType, audioBitsPerSecond: 64000 } : { audioBitsPerSecond: 64000 };
+        const options = mimeType ? { mimeType } : {};
         try {
-            state.mediaRecorder = new MediaRecorder(streamToRecord, recorderOptions);
+            state.mediaRecorder = new MediaRecorder(streamToRecord, options);
         } catch (recErr) {
-            // Fallback to raw mediaStream with default options if filtered stream or bitrate is rejected on older iOS
-            const fallbackOptions = mimeType ? { mimeType } : {};
-            state.mediaRecorder = new MediaRecorder(state.mediaStream, fallbackOptions);
+            state.mediaRecorder = new MediaRecorder(state.mediaStream);
         }
 
         state.mediaRecorder.ondataavailable = (e) => {
@@ -1784,16 +1804,12 @@ async function startRecording() {
             }
         };
 
-        state.mediaRecorder.start(250); // Collect data every 250ms
-        state.isRecording = true;
+        state.mediaRecorder.start(100); // Collect data every 100ms
         state.recordingStartTime = Date.now();
-
-        // 4. Initialize Live Speech Recognition with Auto-Restart Watchdog
-        initLiveSpeechRecognition();
 
         // Update UI
         els.recordBtn.classList.add('recording');
-        els.recordStatus.textContent = '● Aufnahme läuft… (Rauschfilter aktiv)';
+        els.recordStatus.textContent = '● Aufnahme läuft…';
         els.recordStatus.classList.add('recording-active');
         els.recordDiscardBtn.classList.remove('hidden');
         els.recordDoneBtn.classList.remove('hidden');
@@ -1804,6 +1820,11 @@ async function startRecording() {
 
     } catch (error) {
         console.error('Error starting recording:', error);
+        state.isRecording = false;
+        if (state.recognition) {
+            try { state.recognition.stop(); } catch (e) { }
+            state.recognition = null;
+        }
         releaseWakeLock();
         if (error.name === 'NotAllowedError') {
             showToast('Mikrofonzugriff nicht erlaubt. Bitte in den Einstellungen aktivieren.', 'error');
@@ -1813,40 +1834,26 @@ async function startRecording() {
     }
 }
 
-async function initLiveSpeechRecognition() {
+function initLiveSpeechRecognition() {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
         els.transcriptPlaceholder.textContent = 'Live-Vorschau im Browser nicht verfügbar (Audio wird gespeichert).';
         return;
     }
 
-    // Force-abort any lingering SpeechRecognition instance from a previous recording
+    // Cleanly stop any previous instance synchronously (no await!)
     if (state.activeRecognition) {
         try {
             state.activeRecognition.onresult = null;
             state.activeRecognition.onend = null;
             state.activeRecognition.onerror = null;
-            state.activeRecognition.abort();
+            state.activeRecognition.stop();
         } catch (e) { }
         state.activeRecognition = null;
-        // Brief pause to let browser speech service release the previous session
-        await new Promise(r => setTimeout(r, 150));
     }
 
-    if (!state.isRecording) return;
-
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 3;
-    recognition.lang = 'de-DE';
-
-    state.recognition = recognition;
-    state.activeRecognition = recognition;
     state.sessionTranscriptBase = '';
     state.sessionSegments = [];
-    let hasReceivedAnyResult = false;
-    let startRetryCount = 0;
 
     // Rebuilds state.transcript deterministically from sessionTranscriptBase + current session segments
     // Uses "; " after each recognized segment/term to clearly separate parts!
@@ -1857,13 +1864,12 @@ async function initLiveSpeechRecognition() {
             const seg = state.sessionSegments[idx];
             if (!seg || !seg.text) continue;
 
-            // Guard against Android Chrome overlapping cumulative results (where result[i] contains result[i-1])
+            // Guard against overlapping cumulative results (where result[i] contains result[i-1])
             let segText = seg.text.trim();
             const prevSeg = idx > 0 ? state.sessionSegments[idx - 1] : null;
             if (prevSeg && prevSeg.text) {
                 const prevText = prevSeg.text.trim();
                 if (segText.toLowerCase() === prevText.toLowerCase()) {
-                    // Exact duplicate segment fired by mobile engine
                     continue;
                 }
                 if (segText.toLowerCase().startsWith(prevText.toLowerCase())) {
@@ -1895,131 +1901,105 @@ async function initLiveSpeechRecognition() {
         state.transcript = combined;
     };
 
-    recognition.onresult = (event) => {
-        hasReceivedAnyResult = true;
-        startRetryCount = 0;
-        let currentInterim = '';
+    // Always instantiate a brand-new SpeechRecognition object (never reuse an ended instance on iOS WebKit!)
+    const startFreshRecognitionSession = () => {
+        if (!state.isRecording) return;
 
-        for (let i = 0; i < event.results.length; ++i) {
-            const result = event.results[i];
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'de-DE';
 
-            // Pick alternative that best matches medical vocabulary if confidence is close
-            let bestTranscript = result[0].transcript;
-            if (result.length > 1) {
-                const vocabKeys = Object.keys({ ...TECHNICAL_TERMS_MAPPING, ...(state.technicalTerms || {}) });
-                for (let altIdx = 0; altIdx < result.length; altIdx++) {
-                    const candidate = result[altIdx].transcript.toLowerCase();
-                    if (vocabKeys.some(k => k.length > 2 && candidate.includes(k))) {
-                        bestTranscript = result[altIdx].transcript;
-                        break;
-                    }
-                }
-            }
+        state.recognition = recognition;
+        state.activeRecognition = recognition;
 
-            if (result.isFinal) {
-                let text = applyMedicalPostProcessing(bestTranscript.trim());
-                const existing = state.sessionSegments[i];
-                state.sessionSegments[i] = {
-                    text: text,
-                    startTime: existing?.startTime || state.currentSegmentStartTime || Date.now(),
-                    endTime: existing?.endTime || Date.now()
-                };
-                state.currentSegmentStartTime = null;
-            } else {
-                // Ensure we record startTime for this result slot when interim first arrives
-                if (!state.sessionSegments[i]) {
+        recognition.onresult = (event) => {
+            let currentInterim = '';
+
+            for (let i = 0; i < event.results.length; ++i) {
+                const result = event.results[i];
+                const bestTranscript = result[0].transcript;
+
+                if (result.isFinal) {
+                    let text = applyMedicalPostProcessing(bestTranscript.trim());
+                    const existing = state.sessionSegments[i];
                     state.sessionSegments[i] = {
-                        text: '',
-                        startTime: Date.now(),
-                        endTime: null
+                        text: text,
+                        startTime: existing?.startTime || state.currentSegmentStartTime || Date.now(),
+                        endTime: existing?.endTime || Date.now()
                     };
-                }
-                currentInterim += bestTranscript;
-                if (!state.currentSegmentStartTime) {
-                    state.currentSegmentStartTime = Date.now();
-                }
-            }
-        }
-
-        rebuildTranscriptFromSession();
-
-        // If interimTranscript is identical to the end of final transcript (Safari quirk), hide interim duplicate
-        const cleanInterim = applyMedicalPostProcessing(currentInterim.trim()).replace(/[;,]+\s*$/, '').trim();
-        const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
-        if (cleanInterim && cleanFinal.toLowerCase().endsWith(cleanInterim.toLowerCase())) {
-            state.interimTranscript = '';
-        } else {
-            state.interimTranscript = currentInterim;
-        }
-
-        renderLiveTranscriptPreview();
-    };
-
-    recognition.onerror = (event) => {
-        // Ignore harmless no-speech or aborted events during auto-restart
-        if (event.error === 'no-speech' || event.error === 'aborted') {
-            return;
-        }
-        console.warn('Speech recognition warning:', event.error);
-    };
-
-    // Crucial Watchdog: Browser SpeechRecognition stops after silence, ~60s on mobile, or if previous session was still closing.
-    // If state.isRecording is still true, commit current session to base and restart seamlessly!
-    recognition.onend = () => {
-        if (state.activeRecognition === recognition) {
-            state.activeRecognition = null;
-        }
-        if (state.isRecording && state.recognition === recognition) {
-            if (state.interimTranscript && state.interimTranscript.trim()) {
-                const flushed = applyMedicalPostProcessing(state.interimTranscript.trim()).replace(/[;,]+\s*$/, '').trim();
-                const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
-                if (flushed && !cleanFinal.toLowerCase().endsWith(flushed.toLowerCase())) {
-                    const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
-                    state.transcript += prefix + flushed + '; ';
-                }
-                state.interimTranscript = '';
-            }
-            // Lock in current session transcript as the base for the next recognition session
-            state.sessionTranscriptBase = state.transcript;
-            state.sessionSegments = [];
-            renderLiveTranscriptPreview();
-
-            const retryDelay = (!hasReceivedAnyResult && startRetryCount < 5) ? 250 : 150;
-            startRetryCount++;
-
-            setTimeout(() => {
-                if (state.isRecording && state.recognition === recognition) {
-                    try {
-                        recognition.start();
-                        state.activeRecognition = recognition;
-                    } catch (e) {
-                        console.warn('SpeechRecognition restart error, recreating instance:', e);
-                        // If reusing the same instance fails on Safari/iOS, create a fresh one preserving transcript
-                        const savedBase = state.transcript;
-                        initLiveSpeechRecognition().then(() => {
-                            state.sessionTranscriptBase = savedBase;
-                            state.transcript = savedBase;
-                        });
+                    state.currentSegmentStartTime = null;
+                } else {
+                    if (!state.sessionSegments[i]) {
+                        state.sessionSegments[i] = {
+                            text: '',
+                            startTime: Date.now(),
+                            endTime: null
+                        };
+                    }
+                    currentInterim += bestTranscript;
+                    if (!state.currentSegmentStartTime) {
+                        state.currentSegmentStartTime = Date.now();
                     }
                 }
-            }, retryDelay);
-        }
-    };
+            }
 
-    const tryStartRecognition = (attempt = 1) => {
-        if (!state.isRecording || state.recognition !== recognition) return;
+            rebuildTranscriptFromSession();
+
+            // If interimTranscript is identical to the end of final transcript (Safari quirk), hide interim duplicate
+            const cleanInterim = applyMedicalPostProcessing(currentInterim.trim()).replace(/[;,]+\s*$/, '').trim();
+            const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
+            if (cleanInterim && cleanFinal.toLowerCase().endsWith(cleanInterim.toLowerCase())) {
+                state.interimTranscript = '';
+            } else {
+                state.interimTranscript = currentInterim;
+            }
+
+            renderLiveTranscriptPreview();
+        };
+
+        recognition.onerror = (event) => {
+            if (event.error === 'no-speech' || event.error === 'aborted') {
+                return;
+            }
+            console.warn('Speech recognition warning:', event.error);
+        };
+
+        recognition.onend = () => {
+            if (state.activeRecognition === recognition) {
+                state.activeRecognition = null;
+            }
+            if (state.isRecording && state.recognition === recognition) {
+                if (state.interimTranscript && state.interimTranscript.trim()) {
+                    const flushed = applyMedicalPostProcessing(state.interimTranscript.trim()).replace(/[;,]+\s*$/, '').trim();
+                    const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
+                    if (flushed && !cleanFinal.toLowerCase().endsWith(flushed.toLowerCase())) {
+                        const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
+                        state.transcript += prefix + flushed + '; ';
+                    }
+                    state.interimTranscript = '';
+                }
+                state.sessionTranscriptBase = state.transcript;
+                state.sessionSegments = [];
+                renderLiveTranscriptPreview();
+
+                setTimeout(() => {
+                    if (state.isRecording && state.recognition === recognition) {
+                        startFreshRecognitionSession();
+                    }
+                }, 150);
+            }
+        };
+
         try {
             recognition.start();
-            state.activeRecognition = recognition;
         } catch (e) {
-            console.warn(`Could not start SpeechRecognition (attempt ${attempt}):`, e);
-            if (attempt < 5 && state.isRecording) {
-                setTimeout(() => tryStartRecognition(attempt + 1), 250 * attempt);
-            }
+            console.warn('Could not start SpeechRecognition synchronously:', e);
         }
     };
 
-    tryStartRecognition(1);
+    // Call startFreshRecognitionSession() synchronously while still inside the user's tap gesture!
+    startFreshRecognitionSession();
 }
 
 function renderLiveTranscriptPreview() {
@@ -2037,6 +2017,34 @@ function stopRecording() {
     return new Promise((resolve) => {
         releaseWakeLock();
 
+        // Always ensure SpeechRecognition and MediaStream are cleaned up even if mediaRecorder wasn't ready
+        const pendingInterim = state.interimTranscript ? state.interimTranscript.trim() : '';
+        state.interimTranscript = '';
+
+        if (state.recognition || state.activeRecognition) {
+            const rec = state.recognition || state.activeRecognition;
+            state.recognition = null; // Prevent onend watchdog from restarting
+            state.activeRecognition = null;
+            try {
+                rec.onresult = null;
+                rec.onend = null;
+                rec.onerror = null;
+                // Use standard rec.stop() (NOT abort() - abort() puts iOS SFSpeechRecognizer into a locked error state)
+                rec.stop();
+            } catch (e) { }
+        }
+
+        // Flush any remaining interim transcript only if it wasn't already finalized at the end of state.transcript
+        if (pendingInterim) {
+            const flushed = applyMedicalPostProcessing(pendingInterim).replace(/[;,]+\s*$/, '').trim();
+            const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
+            if (flushed && !cleanFinal.toLowerCase().endsWith(flushed.toLowerCase())) {
+                const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
+                state.transcript += prefix + flushed + '; ';
+            }
+            renderLiveTranscriptPreview();
+        }
+
         if (state.mediaRecorder && state.isRecording) {
             state.isRecording = false;
 
@@ -2045,66 +2053,59 @@ function stopRecording() {
                 ? (Date.now() - state.recordingStartTime) / 1000
                 : 0;
 
-            // Stop Speech Recognition FIRST and detach handlers so rec.stop()/abort() doesn't fire a duplicate final onresult!
-            const pendingInterim = state.interimTranscript ? state.interimTranscript.trim() : '';
-            state.interimTranscript = '';
-
-            if (state.recognition) {
-                const rec = state.recognition;
-                state.recognition = null; // Prevent onend watchdog from restarting
-                state.activeRecognition = null;
-                rec.onresult = null;
-                rec.onend = null;
-                rec.onerror = null;
-                try {
-                    // Use abort() instead of stop() because we already detached onresult;
-                    // abort() releases the browser's singleton SpeechRecognition engine immediately for the next recording!
-                    rec.abort();
-                } catch (e) {
-                    try { rec.stop(); } catch (e2) { }
+            let resolved = false;
+            const finishResolve = () => {
+                if (resolved) return;
+                resolved = true;
+                if (!state.audioBlob && state.audioChunks.length > 0) {
+                    const actualMime = (state.mediaRecorder && state.mediaRecorder.mimeType) || 'audio/mp4';
+                    state.audioBlob = new Blob(state.audioChunks, { type: actualMime });
                 }
-            }
-
-            // Flush any remaining interim transcript only if it wasn't already finalized at the end of state.transcript
-            if (pendingInterim) {
-                const flushed = applyMedicalPostProcessing(pendingInterim).replace(/[;,]+\s*$/, '').trim();
-                const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
-                if (flushed && !cleanFinal.toLowerCase().endsWith(flushed.toLowerCase())) {
-                    const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
-                    state.transcript += prefix + flushed + '; ';
-                }
-                renderLiveTranscriptPreview();
-            }
-
-            // Set onstop to create the blob and resolve the promise
-            state.mediaRecorder.onstop = () => {
-                const actualMime = state.mediaRecorder.mimeType || 'audio/webm';
-                state.audioBlob = new Blob(state.audioChunks, { type: actualMime });
-
-                // Stop the media stream tracks AFTER recorder has flushed all chunks
-                if (state.mediaStream) {
-                    state.mediaStream.getTracks().forEach(track => track.stop());
-                    state.mediaStream = null;
-                }
-
-                // Suspend audio context instead of closing (Singleton pattern for iOS)
-                if (state.audioContext && state.audioContext.state !== 'closed') {
-                    try {
-                        state.audioContext.suspend().catch(e => console.warn('Context suspend warning:', e));
-                    } catch (e) {
-                        console.warn(e);
-                    }
-                    state.analyserNode = null;
-                }
-
                 resolve(state.audioBlob);
             };
 
+            // Set onstop to create the blob and resolve the promise
+            state.mediaRecorder.onstop = () => {
+                const actualMime = state.mediaRecorder.mimeType || 'audio/mp4';
+                state.audioBlob = new Blob(state.audioChunks, { type: actualMime });
+                finishResolve();
+            };
+
             try {
-                state.mediaRecorder.stop();
+                if (state.mediaRecorder.state !== 'inactive') {
+                    state.mediaRecorder.stop();
+                } else {
+                    finishResolve();
+                }
             } catch (e) {
                 console.warn('Recorder stop error:', e);
-                resolve(state.audioBlob);
+                finishResolve();
+            }
+
+            // Fallback safety timer in case iOS Safari delays onstop
+            setTimeout(finishResolve, 600);
+
+            // Immediately stop media stream tracks (critical for iOS AVAudioSession release!)
+            if (state.mediaStream) {
+                state.mediaStream.getTracks().forEach(track => track.stop());
+                state.mediaStream = null;
+            }
+
+            // Disconnect audio nodes and suspend context cleanly
+            if (state.sourceNode) {
+                try { state.sourceNode.disconnect(); } catch (e) { }
+                state.sourceNode = null;
+            }
+            if (state.analyserNode) {
+                try { state.analyserNode.disconnect(); } catch (e) { }
+                state.analyserNode = null;
+            }
+            if (state.audioContext && state.audioContext.state !== 'closed') {
+                try {
+                    state.audioContext.suspend().catch(e => console.warn('Context suspend warning:', e));
+                } catch (e) {
+                    console.warn(e);
+                }
             }
 
             // Clear timer
@@ -2115,6 +2116,11 @@ function stopRecording() {
             els.recordStatus.textContent = 'Aufnahme beendet';
             els.recordStatus.classList.remove('recording-active');
         } else {
+            state.isRecording = false;
+            if (state.mediaStream) {
+                state.mediaStream.getTracks().forEach(track => track.stop());
+                state.mediaStream = null;
+            }
             resolve(state.audioBlob);
         }
     });
@@ -2153,20 +2159,32 @@ function updateRecordingTimer() {
 }
 
 function updateVisualizer() {
-    if (!state.isRecording || !state.analyserNode) return;
-
-    const bufferLength = state.analyserNode.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    state.analyserNode.getByteFrequencyData(dataArray);
+    if (!state.isRecording) return;
 
     const bars = els.recordVisualizer.querySelectorAll('.viz-bar');
-    const step = Math.floor(bufferLength / bars.length);
+    if (!bars.length) return;
 
-    bars.forEach((bar, i) => {
-        const value = dataArray[i * step] || 0;
-        const height = Math.max(4, (value / 255) * 56);
-        bar.style.height = `${height}px`;
-    });
+    if (state.analyserNode) {
+        const bufferLength = state.analyserNode.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        state.analyserNode.getByteFrequencyData(dataArray);
+        const step = Math.floor(bufferLength / bars.length);
+
+        bars.forEach((bar, i) => {
+            const value = dataArray[i * step] || 0;
+            const height = Math.max(4, (value / 255) * 56);
+            bar.style.height = `${height}px`;
+        });
+    } else {
+        // iOS-safe visualizer animation (avoids WebAudio AudioContext locking AVAudioSession)
+        const now = Date.now() / 140;
+        bars.forEach((bar, i) => {
+            const wave = Math.sin(now + i * 0.45) * 0.5 + 0.5;
+            const pulse = Math.cos(now * 1.6 - i * 0.3) * 0.35 + 0.35;
+            const height = Math.max(4, Math.min(48, 6 + wave * 22 + pulse * 14));
+            bar.style.height = `${height.toFixed(1)}px`;
+        });
+    }
 
     requestAnimationFrame(updateVisualizer);
 }
@@ -2740,6 +2758,10 @@ async function showSaveForm() {
 
 async function runAiTranscriptionPass(isManualTrigger = false) {
     if (!state.audioBlob || state.isTranscribingAI) return;
+    const hasConfiguredCloudKey = !!(state.aiSettings?.groqApiKey || state.aiSettings?.geminiApiKey);
+    if (!isManualTrigger && !hasConfiguredCloudKey) {
+        return;
+    }
     if (!navigator.onLine) {
         if (isManualTrigger) showToast('Offline – KI-Transkription benötigt Internet', 'info');
         return;
