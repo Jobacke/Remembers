@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.1.0';
+const APP_VERSION = '5.1.1';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -1476,7 +1476,10 @@ function applyMedicalPostProcessing(rawText) {
     // 4. Deduplicate accidental multiple "x" after numbers (e.g., if user term had "x System" or "5 x x System" -> "5 x System")
     text = text.replace(/\b(\d+)\s*(?:[xX×]\s*){2,}/g, '$1 x ');
 
-    // 5. Clean up spacing around punctuation & newlines
+    // 5. Separate consecutive quantity items in one utterance with "; " (e.g. "2 x Laken 3 x Decken" or "2 x Laken, 3 x Decken" -> "2 x Laken; 3 x Decken")
+    text = text.replace(/([A-Za-zÄÖÜäöüß0-9%])\s*,?\s+(?=\d+\s*x\s+[A-Za-zÄÖÜäöüß])/g, '$1; ');
+
+    // 6. Clean up spacing around punctuation & newlines
     text = text.replace(/[ \t]+\n/g, '\n');
     text = text.replace(/\n[ \t]+/g, '\n');
     text = text.replace(/;\s*;/g, ';');
@@ -1827,42 +1830,47 @@ function initLiveSpeechRecognition() {
     state.sessionSegments = [];
 
     // Rebuilds state.transcript deterministically from sessionTranscriptBase + current session segments
-    // This completely prevents Safari/iOS and Android Chrome from duplicating text when re-firing result indices!
+    // Uses "; " after each recognized segment/term to clearly separate parts!
     const rebuildTranscriptFromSession = () => {
-        let combined = state.sessionTranscriptBase || '';
-        let prevEndTime = 0;
+        let combined = (state.sessionTranscriptBase || '').trim();
 
         for (let idx = 0; idx < state.sessionSegments.length; idx++) {
             const seg = state.sessionSegments[idx];
             if (!seg || !seg.text) continue;
 
-            let prefix = ' ';
-            if (prevEndTime > 0 && seg.startTime && (seg.startTime - prevEndTime > 450)) {
-                if (!seg.text.startsWith('\n') && !seg.text.startsWith(';')) {
-                    prefix = '; ';
-                }
-            } else if (idx === 0 && combined) {
-                prefix = (combined.endsWith('\n') || combined.endsWith('; ')) ? '' : '; ';
-            }
-
-            if (combined === '' || seg.text.startsWith('\n') || combined.endsWith('\n') || combined.endsWith('; ')) {
-                prefix = '';
-            }
-
             // Guard against Android Chrome overlapping cumulative results (where result[i] contains result[i-1])
+            let segText = seg.text.trim();
             const prevSeg = idx > 0 ? state.sessionSegments[idx - 1] : null;
-            if (prevSeg && prevSeg.text && seg.text.toLowerCase().startsWith(prevSeg.text.toLowerCase())) {
-                const remainder = seg.text.slice(prevSeg.text.length).trim();
-                if (!remainder) continue;
-                combined += prefix + remainder;
-            } else if (prevSeg && prevSeg.text && prevSeg.text.toLowerCase() === seg.text.toLowerCase()) {
-                // Exact duplicate segment fired by mobile engine
-                continue;
-            } else {
-                combined += prefix + seg.text;
+            if (prevSeg && prevSeg.text) {
+                const prevText = prevSeg.text.trim();
+                if (segText.toLowerCase() === prevText.toLowerCase()) {
+                    // Exact duplicate segment fired by mobile engine
+                    continue;
+                }
+                if (segText.toLowerCase().startsWith(prevText.toLowerCase())) {
+                    segText = segText.slice(prevText.length).replace(/^[;,\s]+/, '').trim();
+                    if (!segText) continue;
+                }
             }
 
-            prevEndTime = seg.endTime || seg.startTime || Date.now();
+            if (!segText) continue;
+
+            // Clean trailing comma/semicolon from segment so we can add a clean "; "
+            segText = segText.replace(/[;,]+\s*$/, '').trim();
+            if (!segText) continue;
+
+            if (combined === '') {
+                combined = segText;
+            } else if (segText.startsWith('\n') || combined.endsWith('\n')) {
+                combined += segText;
+            } else {
+                combined = combined.replace(/[;,]+\s*$/, '') + '; ' + segText;
+            }
+        }
+
+        // Ensure trailing "; " after the last recognized term (unless empty or ending with newline)
+        if (combined && !combined.endsWith('\n')) {
+            combined = combined.replace(/[;,]+\s*$/, '') + '; ';
         }
 
         state.transcript = combined;
@@ -1915,8 +1923,9 @@ function initLiveSpeechRecognition() {
         rebuildTranscriptFromSession();
 
         // If interimTranscript is identical to the end of final transcript (Safari quirk), hide interim duplicate
-        const cleanInterim = applyMedicalPostProcessing(currentInterim.trim());
-        if (cleanInterim && state.transcript.toLowerCase().endsWith(cleanInterim.toLowerCase())) {
+        const cleanInterim = applyMedicalPostProcessing(currentInterim.trim()).replace(/[;,]+\s*$/, '').trim();
+        const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
+        if (cleanInterim && cleanFinal.toLowerCase().endsWith(cleanInterim.toLowerCase())) {
             state.interimTranscript = '';
         } else {
             state.interimTranscript = currentInterim;
@@ -1938,10 +1947,11 @@ function initLiveSpeechRecognition() {
     recognition.onend = () => {
         if (state.isRecording && state.recognition === recognition) {
             if (state.interimTranscript && state.interimTranscript.trim()) {
-                const flushed = applyMedicalPostProcessing(state.interimTranscript.trim());
-                if (flushed && !state.transcript.toLowerCase().endsWith(flushed.toLowerCase())) {
+                const flushed = applyMedicalPostProcessing(state.interimTranscript.trim()).replace(/[;,]+\s*$/, '').trim();
+                const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
+                if (flushed && !cleanFinal.toLowerCase().endsWith(flushed.toLowerCase())) {
                     const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
-                    state.transcript += prefix + flushed;
+                    state.transcript += prefix + flushed + '; ';
                 }
                 state.interimTranscript = '';
             }
@@ -2009,10 +2019,11 @@ function stopRecording() {
 
             // Flush any remaining interim transcript only if it wasn't already finalized at the end of state.transcript
             if (pendingInterim) {
-                const flushed = applyMedicalPostProcessing(pendingInterim);
-                if (flushed && !state.transcript.toLowerCase().endsWith(flushed.toLowerCase())) {
+                const flushed = applyMedicalPostProcessing(pendingInterim).replace(/[;,]+\s*$/, '').trim();
+                const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
+                if (flushed && !cleanFinal.toLowerCase().endsWith(flushed.toLowerCase())) {
                     const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
-                    state.transcript += prefix + flushed;
+                    state.transcript += prefix + flushed + '; ';
                 }
                 renderLiveTranscriptPreview();
             }
@@ -2665,7 +2676,10 @@ async function showSaveForm() {
     renderCategorySelect();
 
     // Fill text area with captured live transcript immediately (processed with medical dictionary)
-    const initialDraft = applyMedicalPostProcessing(state.transcript.trim());
+    let initialDraft = applyMedicalPostProcessing(state.transcript.trim());
+    if (initialDraft && !initialDraft.endsWith(';')) {
+        initialDraft = initialDraft.replace(/[;,]+\s*$/, '') + ';';
+    }
     els.noteTranscript.value = initialDraft;
 
     if (!state.isAppending) {
