@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.0.8';
+const APP_VERSION = '5.0.9';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -478,7 +478,7 @@ function summarizeMaterials(text) {
         let itemOrder = [];
         let nonItems = [];
 
-        let regex = /^\s*(\d+)\s*(?:x\s*)?(.+?)\s*$/i;
+        let regex = /^\s*(\d+)\s*(?:[xX×]\s*)*(.+?)\s*$/i;
 
         for (let part of parts) {
             part = part.trim();
@@ -1444,14 +1444,15 @@ function applyMedicalPostProcessing(rawText) {
     text = text.replace(/\b(?:semikolon|strichpunkt)\b/gi, '; ');
 
     // 2. Number words before "mal" or "x" or medical items: e.g. "zwei mal" -> "2 x", "dreimal" -> "3 x"
-    text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\s*mal\b/gi, (m, numWord) => {
+    text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\s*(?:mal|x)\b/gi, (m, numWord) => {
         const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
         return `${digit} x`;
     });
-    text = text.replace(/\b(\d+)\s*mal\b/gi, '$1 x');
+    text = text.replace(/\b(\d+)\s*(?:mal|x)\b/gi, '$1 x');
 
     // Also convert standalone number words followed by common medical supplies or uppercase nouns (e.g. "zwei Laken" -> "2 x Laken")
-    text = text.replace(/\b(zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s+(?=[A-ZÄÖÜ][a-zäöüß]+)/gi, (m, numWord) => {
+    // Negative lookahead (?!x\b|mal\b) prevents matching if "x" or "mal" is already there
+    text = text.replace(/\b(zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s+(?!x\b|mal\b)(?=[A-ZÄÖÜ][a-zäöüß]+)/gi, (m, numWord) => {
         const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
         return `${digit} x `;
     });
@@ -1470,7 +1471,10 @@ function applyMedicalPostProcessing(rawText) {
         text = text.replace(regex, correct);
     }
 
-    // 4. Clean up spacing around punctuation & newlines
+    // 4. Deduplicate accidental multiple "x" after numbers (e.g., if user term had "x System" or "5 x x System" -> "5 x System")
+    text = text.replace(/\b(\d+)\s*(?:[xX×]\s*){2,}/g, '$1 x ');
+
+    // 5. Clean up spacing around punctuation & newlines
     text = text.replace(/[ \t]+\n/g, '\n');
     text = text.replace(/\n[ \t]+/g, '\n');
     text = text.replace(/;\s*;/g, ';');
