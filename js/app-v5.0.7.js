@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.1.1';
+const APP_VERSION = '5.1.2';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -283,6 +283,7 @@ const state = {
     interimTranscript: '',
     sessionTranscriptBase: '',
     sessionSegments: [],
+    activeRecognition: null,
     isTranscribingAI: false
 };
 
@@ -1812,11 +1813,26 @@ async function startRecording() {
     }
 }
 
-function initLiveSpeechRecognition() {
+async function initLiveSpeechRecognition() {
     if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
         els.transcriptPlaceholder.textContent = 'Live-Vorschau im Browser nicht verfügbar (Audio wird gespeichert).';
         return;
     }
+
+    // Force-abort any lingering SpeechRecognition instance from a previous recording
+    if (state.activeRecognition) {
+        try {
+            state.activeRecognition.onresult = null;
+            state.activeRecognition.onend = null;
+            state.activeRecognition.onerror = null;
+            state.activeRecognition.abort();
+        } catch (e) { }
+        state.activeRecognition = null;
+        // Brief pause to let browser speech service release the previous session
+        await new Promise(r => setTimeout(r, 150));
+    }
+
+    if (!state.isRecording) return;
 
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
@@ -1826,8 +1842,11 @@ function initLiveSpeechRecognition() {
     recognition.lang = 'de-DE';
 
     state.recognition = recognition;
+    state.activeRecognition = recognition;
     state.sessionTranscriptBase = '';
     state.sessionSegments = [];
+    let hasReceivedAnyResult = false;
+    let startRetryCount = 0;
 
     // Rebuilds state.transcript deterministically from sessionTranscriptBase + current session segments
     // Uses "; " after each recognized segment/term to clearly separate parts!
@@ -1877,6 +1896,8 @@ function initLiveSpeechRecognition() {
     };
 
     recognition.onresult = (event) => {
+        hasReceivedAnyResult = true;
+        startRetryCount = 0;
         let currentInterim = '';
 
         for (let i = 0; i < event.results.length; ++i) {
@@ -1942,9 +1963,12 @@ function initLiveSpeechRecognition() {
         console.warn('Speech recognition warning:', event.error);
     };
 
-    // Crucial Watchdog: Browser SpeechRecognition stops after silence or ~60s on mobile.
+    // Crucial Watchdog: Browser SpeechRecognition stops after silence, ~60s on mobile, or if previous session was still closing.
     // If state.isRecording is still true, commit current session to base and restart seamlessly!
     recognition.onend = () => {
+        if (state.activeRecognition === recognition) {
+            state.activeRecognition = null;
+        }
         if (state.isRecording && state.recognition === recognition) {
             if (state.interimTranscript && state.interimTranscript.trim()) {
                 const flushed = applyMedicalPostProcessing(state.interimTranscript.trim()).replace(/[;,]+\s*$/, '').trim();
@@ -1960,23 +1984,42 @@ function initLiveSpeechRecognition() {
             state.sessionSegments = [];
             renderLiveTranscriptPreview();
 
+            const retryDelay = (!hasReceivedAnyResult && startRetryCount < 5) ? 250 : 150;
+            startRetryCount++;
+
             setTimeout(() => {
                 if (state.isRecording && state.recognition === recognition) {
                     try {
                         recognition.start();
+                        state.activeRecognition = recognition;
                     } catch (e) {
-                        console.warn('SpeechRecognition restart error:', e);
+                        console.warn('SpeechRecognition restart error, recreating instance:', e);
+                        // If reusing the same instance fails on Safari/iOS, create a fresh one preserving transcript
+                        const savedBase = state.transcript;
+                        initLiveSpeechRecognition().then(() => {
+                            state.sessionTranscriptBase = savedBase;
+                            state.transcript = savedBase;
+                        });
                     }
                 }
-            }, 120);
+            }, retryDelay);
         }
     };
 
-    try {
-        recognition.start();
-    } catch (e) {
-        console.warn('Could not start SpeechRecognition:', e);
-    }
+    const tryStartRecognition = (attempt = 1) => {
+        if (!state.isRecording || state.recognition !== recognition) return;
+        try {
+            recognition.start();
+            state.activeRecognition = recognition;
+        } catch (e) {
+            console.warn(`Could not start SpeechRecognition (attempt ${attempt}):`, e);
+            if (attempt < 5 && state.isRecording) {
+                setTimeout(() => tryStartRecognition(attempt + 1), 250 * attempt);
+            }
+        }
+    };
+
+    tryStartRecognition(1);
 }
 
 function renderLiveTranscriptPreview() {
@@ -2002,19 +2045,24 @@ function stopRecording() {
                 ? (Date.now() - state.recordingStartTime) / 1000
                 : 0;
 
-            // Stop Speech Recognition FIRST and detach handlers so rec.stop() doesn't fire a duplicate final onresult!
+            // Stop Speech Recognition FIRST and detach handlers so rec.stop()/abort() doesn't fire a duplicate final onresult!
             const pendingInterim = state.interimTranscript ? state.interimTranscript.trim() : '';
             state.interimTranscript = '';
 
             if (state.recognition) {
                 const rec = state.recognition;
                 state.recognition = null; // Prevent onend watchdog from restarting
+                state.activeRecognition = null;
                 rec.onresult = null;
                 rec.onend = null;
                 rec.onerror = null;
                 try {
-                    rec.stop();
-                } catch (e) { }
+                    // Use abort() instead of stop() because we already detached onresult;
+                    // abort() releases the browser's singleton SpeechRecognition engine immediately for the next recording!
+                    rec.abort();
+                } catch (e) {
+                    try { rec.stop(); } catch (e2) { }
+                }
             }
 
             // Flush any remaining interim transcript only if it wasn't already finalized at the end of state.transcript
