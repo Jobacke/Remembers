@@ -52,14 +52,7 @@
 </head>
 
 <body>
-  <!-- DEBUG BANNER REMOVED v3.1.16 -->
-  <script>
-    // EMERGENCY UPDATE v3.1.16
-    try {
-      if ('serviceWorker' in navigator) navigator.serviceWorker.getRegistrations().then(r => r.forEach(s => s.unregister()));
-      if ('caches' in window) caches.keys().then(k => k.forEach(n => caches.delete(n)));
-    } catch (e) { console.error(e); }
-  </script>
+  <!-- Service Worker managed in app.js -->
 
   <!-- ========== LOADING SCREEN ========== -->
   <div id="loading-screen">
@@ -171,6 +164,16 @@
           </svg>
           Fachbegriffe
         </button>
+        <button id="btn-ai-settings" class="user-menu-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"></path>
+            <path d="M16 10v1a4 4 0 0 1-8 0v-1"></path>
+            <line x1="12" y1="15" x2="12" y2="22"></line>
+            <line x1="8" y1="22" x2="16" y2="22"></line>
+          </svg>
+          KI-Spracherkennung
+        </button>
         <button id="btn-faq" class="user-menu-item">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
             stroke-linejoin="round">
@@ -188,7 +191,7 @@
           Abmelden
         </button>
         <div class="user-menu-footer" style="padding: 12px; font-size: 11px; text-align: center; color: white;">
-          v<span id="app-version-display">1.5.2</span>
+          v<span id="app-version-display">5.0.8</span>
         </div>
       </div>
     </header>
@@ -278,13 +281,18 @@
           </div>
         </div>
         <div class="form-group">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-            <label class="form-label" for="note-transcript" style="margin-bottom:0;">Transkript (bearbeitbar)</label>
-            <div style="display:flex; gap:8px;">
-              <button id="summarize-btn" class="btn btn-sm btn-secondary" style="font-size:11px; padding:2px 8px;"
-                title="Materialien zusammenzählen">✨ Mengen aufsummieren</button>
-              <button id="toggle-terms-inline" class="btn btn-sm btn-secondary"
-                style="font-size:11px; padding:2px 8px;">+ Fachbegriff</button>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:4px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <label class="form-label" for="note-transcript" style="margin-bottom:0;">Transkript (bearbeitbar)</label>
+              <span id="ai-transcript-badge" class="hidden" style="font-size:11px; padding:2px 8px; border-radius:999px; background:rgba(234, 179, 8, 0.2); color:var(--primary-light); font-weight:600; display:inline-flex; align-items:center; gap:4px;">✨ KI-optimiert</span>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button id="retranscribe-ai-btn" type="button" class="btn btn-sm btn-secondary" style="font-size:11px; padding:3px 8px; flex:none;"
+                title="Mit medizinischer KI aus Audio neu transkribieren">🎙️ KI-Präzision</button>
+              <button id="summarize-btn" type="button" class="btn btn-sm btn-secondary" style="font-size:11px; padding:3px 8px; flex:none;"
+                title="Materialien zusammenzählen">✨ Mengen</button>
+              <button id="toggle-terms-inline" type="button" class="btn btn-sm btn-secondary"
+                style="font-size:11px; padding:3px 8px; flex:none;">+ Fachbegriff</button>
             </div>
           </div>
 
@@ -427,6 +435,63 @@
     </div>
   </div>
 
+  <!-- ========== AI SETTINGS MODAL ========== -->
+  <div id="ai-settings-modal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h2 class="modal-title">🎙️ KI-Spracherkennung & Audio</h2>
+        <button id="ai-settings-modal-close" class="modal-close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+            stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div style="padding: 0 4px 20px 4px;">
+        <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:16px;line-height:1.5;">
+          Die App nutzt eine <strong>mehrstufige Hybrid-Erkennung</strong> mit aktiver Störgeräuschfilterung (Hochpass- & Sprachfrequenzfilter + Kompressor) und einem umfangreichen <strong>medizinischen Fachwörterbuch</strong>.
+        </p>
+
+        <div style="background:var(--bg-elevated);padding:14px;border-radius:var(--radius-md);border:1px solid var(--border);margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <span style="font-weight:600;font-size:0.95rem;">Status der Erkennungs-Engine</span>
+            <span id="ai-engine-status-badge" style="font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(52, 211, 153, 0.15);color:var(--success);font-weight:600;">Aktiv</span>
+          </div>
+          <p id="ai-engine-status-desc" style="font-size:0.82rem;color:var(--text-muted);line-height:1.4;">
+            Prüfe verfügbare KI-Modelle...
+          </p>
+        </div>
+
+        <div class="form-group" style="margin-bottom:16px;">
+          <label class="form-label" for="ai-gemini-key">Google Gemini API-Key (optional für direkte Multimodale Audio-KI)</label>
+          <input id="ai-gemini-key" type="password" class="form-input" placeholder="AIzaSy... (leer lassen für Firebase AI / Standard)" autocomplete="off" style="font-size:14px;">
+          <p style="font-size:0.78rem;color:var(--text-muted);margin-top:6px;line-height:1.4;">
+            Mit Gemini 2.5 Flash oder Groq Whisper Large v3 wird die tatsächliche Audiodatei nach dem Stoppen nochmals komplett mit deinem medizinischen Vokabular analysiert – ideal bei starken Umgebungsgeräuschen (z.B. im RTW/Fahrzeug).
+          </p>
+        </div>
+
+        <div class="form-group" style="margin-bottom:16px;">
+          <label class="form-label" for="ai-groq-key">Groq API-Key (optional für extrem schnelles Whisper Large v3)</label>
+          <input id="ai-groq-key" type="password" class="form-input" placeholder="gsk_... (optional)" autocomplete="off" style="font-size:14px;">
+        </div>
+
+        <div class="form-group" style="margin-bottom:20px;">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:0.9rem;color:var(--text-primary);">
+            <input id="ai-noise-filter-toggle" type="checkbox" checked style="width:18px;height:18px;accent-color:var(--primary);">
+            <span><strong>Rettungsdienst-Audiofilter aktivieren</strong> (filtert Motor-/Fahrgeräusche unter 85 Hz und verstärkt leise Sprache automatisch)</span>
+          </label>
+        </div>
+
+        <div class="form-actions">
+          <button id="ai-settings-test-btn" type="button" class="btn btn-secondary">Verbindung testen</button>
+          <button id="ai-settings-save-btn" type="button" class="btn btn-primary">Speichern</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- ========== FAQ MODAL ========== -->
   <div id="faq-modal" class="modal-overlay">
     <div class="modal">
@@ -472,12 +537,12 @@
   <!-- ========== TOAST CONTAINER ========== -->
   <div id="version-overlay"
     style="position: fixed; bottom: 8px; right: 8px; font-size: 13px; font-weight: bold; color: rgba(255,255,255,0.8); background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 9999;">
-    v5.0.7</div>
+    v5.0.8</div>
   <div id="toast-container" class="toast-container"></div>
 
   <!-- ========== SCRIPTS ========== -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script type="module" src="js/app-v5.0.7.js"></script>
+  <script type="module" src="js/app-v5.0.7.js?v=5.0.8"></script>
 
 </body>
 

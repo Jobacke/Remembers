@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.0.7';
+const APP_VERSION = '5.0.8';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -163,6 +163,8 @@ import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.3.0/firebas
 import {
     getAuth,
     signInWithPopup,
+    signInWithRedirect,
+    getRedirectResult,
     GoogleAuthProvider,
     onAuthStateChanged,
     signOut,
@@ -172,6 +174,10 @@ import {
     sendEmailVerification,
     updateProfile
 } from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-auth.js';
+import {
+    getVertexAI,
+    getGenerativeModel
+} from 'https://www.gstatic.com/firebasejs/11.3.0/firebase-vertexai.js';
 import {
     getFirestore,
     collection,
@@ -266,7 +272,16 @@ const state = {
     isOffline: !navigator.onLine,
     uploadQueue: [],
     // Fachbegriffe
-    technicalTerms: { ...TECHNICAL_TERMS_MAPPING }
+    technicalTerms: { ...TECHNICAL_TERMS_MAPPING },
+    // AI & Audio Settings
+    aiSettings: {
+        geminiApiKey: '',
+        groqApiKey: '',
+        enableNoiseFilter: true
+    },
+    wakeLock: null,
+    interimTranscript: '',
+    isTranscribingAI: false
 };
 
 
@@ -301,6 +316,7 @@ const els = {
     userMenuEmail: $('#user-menu-email'),
     btnManageCategories: $('#btn-manage-categories'),
     btnManageTerms: $('#btn-manage-terms'),
+    btnAiSettings: $('#btn-ai-settings'),
     btnFaq: $('#btn-faq'),
     btnLogout: $('#btn-logout'),
     // Notes
@@ -385,6 +401,18 @@ const els = {
     inlineAddTermBtn: $('#inline-add-term-btn'),
     inlineTermsStatus: $('#inline-terms-status'),
     summarizeBtn: $('#summarize-btn'),
+    retranscribeAiBtn: $('#retranscribe-ai-btn'),
+    aiTranscriptBadge: $('#ai-transcript-badge'),
+    // AI Settings Modal
+    aiSettingsModal: $('#ai-settings-modal'),
+    aiSettingsModalClose: $('#ai-settings-modal-close'),
+    aiGeminiKey: $('#ai-gemini-key'),
+    aiGroqKey: $('#ai-groq-key'),
+    aiNoiseFilterToggle: $('#ai-noise-filter-toggle'),
+    aiSettingsTestBtn: $('#ai-settings-test-btn'),
+    aiSettingsSaveBtn: $('#ai-settings-save-btn'),
+    aiEngineStatusBadge: $('#ai-engine-status-badge'),
+    aiEngineStatusDesc: $('#ai-engine-status-desc'),
 };
 
 // ============================================================
@@ -712,13 +740,68 @@ async function loadTechnicalTerms() {
         const docSnap = await getDoc(docRef);
 
         if (docSnap.exists() && docSnap.data().terms) {
-            state.technicalTerms = docSnap.data().terms;
+            // Merge defaults with user terms so new medical terms from config are always included
+            state.technicalTerms = { ...TECHNICAL_TERMS_MAPPING, ...docSnap.data().terms };
         } else {
             state.technicalTerms = { ...TECHNICAL_TERMS_MAPPING };
         }
     } catch (e) {
         console.warn('Technical terms load error (offline?):', e);
         // Fallback to defaults already in state
+        state.technicalTerms = { ...TECHNICAL_TERMS_MAPPING };
+    }
+}
+
+async function loadAiSettings() {
+    // Load from localStorage first for instant availability
+    try {
+        const local = localStorage.getItem('notizen_ai_settings');
+        if (local) {
+            state.aiSettings = { ...state.aiSettings, ...JSON.parse(local) };
+        }
+    } catch (e) {
+        console.warn('Local AI settings load error:', e);
+    }
+
+    // Load from Firestore user settings
+    try {
+        const docRef = doc(db, 'users', state.user.uid, 'settings', 'aiConfig');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            state.aiSettings = {
+                geminiApiKey: data.geminiApiKey || state.aiSettings.geminiApiKey || '',
+                groqApiKey: data.groqApiKey || state.aiSettings.groqApiKey || '',
+                enableNoiseFilter: data.enableNoiseFilter !== undefined ? data.enableNoiseFilter : true
+            };
+            localStorage.setItem('notizen_ai_settings', JSON.stringify(state.aiSettings));
+        }
+    } catch (e) {
+        console.warn('AI settings Firestore load error:', e);
+    }
+}
+
+async function saveAiSettings() {
+    try {
+        state.aiSettings = {
+            geminiApiKey: els.aiGeminiKey ? els.aiGeminiKey.value.trim() : '',
+            groqApiKey: els.aiGroqKey ? els.aiGroqKey.value.trim() : '',
+            enableNoiseFilter: els.aiNoiseFilterToggle ? els.aiNoiseFilterToggle.checked : true
+        };
+        localStorage.setItem('notizen_ai_settings', JSON.stringify(state.aiSettings));
+
+        if (state.user) {
+            const docRef = doc(db, 'users', state.user.uid, 'settings', 'aiConfig');
+            await setDoc(docRef, {
+                ...state.aiSettings,
+                updatedAt: serverTimestamp()
+            });
+        }
+        updateAiSettingsStatusUI();
+        showToast('KI- & Audio-Einstellungen gespeichert', 'success');
+    } catch (e) {
+        console.error('Error saving AI settings:', e);
+        showToast('Lokal gespeichert', 'info');
     }
 }
 
@@ -1165,7 +1248,7 @@ function toggleTranscriptEdit(noteId) {
         // Correct in textarea
         const current = textarea.value;
         const escW = w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const reg = new RegExp(`\\b${escW}\\b`, 'gi');
+        const reg = new RegExp(`(?<![\\wÄÖÜäöüß])${escW}(?![\\wÄÖÜäöüß])`, 'gi');
         const matchCount = (current.match(reg) || []).length;
 
         if (matchCount > 0) {
@@ -1331,124 +1414,272 @@ async function updateNoteTitle(noteId, newTitle) {
 }
 
 // ============================================================
+// MEDICAL VOCABULARY & SMART POST-PROCESSING
+// ============================================================
+
+const NUMBER_WORDS_DE = {
+    'ein': '1', 'eine': '1', 'einen': '1', 'eins': '1',
+    'zwei': '2', 'zwo': '2',
+    'drei': '3',
+    'vier': '4',
+    'fünf': '5',
+    'sechs': '6',
+    'sieben': '7',
+    'acht': '8',
+    'neun': '9',
+    'zehn': '10',
+    'elf': '11',
+    'zwölf': '12',
+    'fünfzehn': '15',
+    'zwanzig': '20'
+};
+
+function applyMedicalPostProcessing(rawText) {
+    if (!rawText) return '';
+    let text = rawText;
+
+    // 1. Magic Words: "neue Zeile" / "Zeile" -> \n, "neuer Absatz" / "Absatz" -> \n\n, "Semikolon" / "Strichpunkt" -> ;
+    text = text.replace(/\b(?:neue\s+)?zeile\b/gi, '\n');
+    text = text.replace(/\b(?:neuer\s+)?absatz\b/gi, '\n\n');
+    text = text.replace(/\b(?:semikolon|strichpunkt)\b/gi, '; ');
+
+    // 2. Number words before "mal" or "x" or medical items: e.g. "zwei mal" -> "2 x", "dreimal" -> "3 x"
+    text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\s*mal\b/gi, (m, numWord) => {
+        const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
+        return `${digit} x`;
+    });
+    text = text.replace(/\b(\d+)\s*mal\b/gi, '$1 x');
+
+    // Also convert standalone number words followed by common medical supplies or uppercase nouns (e.g. "zwei Laken" -> "2 x Laken")
+    text = text.replace(/\b(zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s+(?=[A-ZÄÖÜ][a-zäöüß]+)/gi, (m, numWord) => {
+        const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
+        return `${digit} x `;
+    });
+
+    // 3. Fachbegriffe korrigieren (longest keys first so multi-word phrases match before single words)
+    const termsToUse = state.technicalTerms && Object.keys(state.technicalTerms).length > 0
+        ? { ...TECHNICAL_TERMS_MAPPING, ...state.technicalTerms }
+        : TECHNICAL_TERMS_MAPPING;
+
+    const sortedEntries = Object.entries(termsToUse).sort((a, b) => b[0].length - a[0].length);
+
+    for (const [wrong, correct] of sortedEntries) {
+        if (!wrong) continue;
+        const escapedWrong = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(?<![\\wÄÖÜäöüß])${escapedWrong}(?![\\wÄÖÜäöüß])`, 'gi');
+        text = text.replace(regex, correct);
+    }
+
+    // 4. Clean up spacing around punctuation & newlines
+    text = text.replace(/[ \t]+\n/g, '\n');
+    text = text.replace(/\n[ \t]+/g, '\n');
+    text = text.replace(/;\s*;/g, ';');
+    return text;
+}
+
+function blobToBase64(blob) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const dataUrl = reader.result;
+            const base64 = dataUrl.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+}
+
+function buildMedicalPromptContext(liveDraft = '') {
+    const customTerms = Object.entries({ ...TECHNICAL_TERMS_MAPPING, ...(state.technicalTerms || {}) })
+        .map(([w, c]) => `${c}`)
+        .filter((v, i, a) => a.indexOf(v) === i)
+        .slice(0, 120)
+        .join(', ');
+
+    return `Du bist ein hochpräzises medizinisches Transkriptionssystem für den deutschen Rettungsdienst (JUH / Notfallmedizin) und allgemeine Sprachnotizen.
+Aufgabe: Transkribiere die folgende Sprachaufnahme wortgetreu, klar und fehlerfrei ins Deutsche.
+Wichtige Regeln:
+1. Ignoriere Hintergrundgeräusche (Motor, Martinshorn, Funk, Wind, Rascheln). Gib NIEMALS Halluzinationen oder Erklärungen aus – gib NUR den gesprochenen Text zurück!
+2. Wenn die Aufnahme komplett still ist oder nur aus Störgeräuschen besteht, gib exakt einen leeren String zurück.
+3. Erkenne medizinische Fachbegriffe, Medikamente, Abkürzungen und Rettungsdienst-Materialien präzise. Wichtige bekannte Begriffe: ${customTerms}.
+4. Wenn Mengen oder Materialien aufgezählt werden (z. B. zum Auffüllen auf der Wache), formatiere Mengenangaben einheitlich als "2 x Laken; 1 x Viggo; 3 x Jonosteril" (getrennt durch Semikolon "; " bei kurzen Pausen zwischen Artikeln).
+5. Gesprochene Steuerbefehle wie "Neue Zeile" oder "Absatz" als echten Zeilenumbruch umsetzen.
+${liveDraft ? `Hinweis aus der Live-Vorerkennung (kann Hörfehler bei Fachbegriffen enthalten, bitte anhand des Audios prüfen und korrigieren): "${liveDraft}"` : ''}`;
+}
+
+async function transcribeWithAI(audioBlob, liveDraft = '') {
+    if (!audioBlob || audioBlob.size < 1000 || !navigator.onLine) {
+        return null;
+    }
+
+    const prompt = buildMedicalPromptContext(liveDraft);
+    const mimeType = (audioBlob.type || 'audio/webm').split(';')[0];
+
+    // Tier 1: Direct Groq Whisper Large v3 (if Groq API Key configured)
+    if (state.aiSettings?.groqApiKey) {
+        try {
+            const formData = new FormData();
+            const ext = mimeType.includes('mp4') ? 'm4a' : mimeType.includes('ogg') ? 'ogg' : 'webm';
+            formData.append('file', audioBlob, `recording.${ext}`);
+            formData.append('model', 'whisper-large-v3-turbo');
+            formData.append('language', 'de');
+            const vocabHint = Object.values({ ...TECHNICAL_TERMS_MAPPING, ...(state.technicalTerms || {}) })
+                .filter((v, i, a) => a.indexOf(v) === i)
+                .slice(0, 80)
+                .join(', ');
+            formData.append('prompt', `Rettungsdienst, Notfallmedizin, JUH, Materialauffüllung: ${vocabHint}`);
+            formData.append('temperature', '0');
+
+            const resp = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${state.aiSettings.groqApiKey}`
+                },
+                body: formData
+            });
+
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.text && data.text.trim()) {
+                    return applyMedicalPostProcessing(data.text.trim());
+                }
+            } else {
+                console.warn('Groq Whisper response not ok:', resp.status);
+            }
+        } catch (e) {
+            console.warn('Groq transcription failed, falling back:', e);
+        }
+    }
+
+    // Prepare base64 for Gemini Multimodal Audio
+    let base64Audio = null;
+    try {
+        base64Audio = await blobToBase64(audioBlob);
+    } catch (e) {
+        console.warn('Base64 conversion failed:', e);
+        return null;
+    }
+
+    // Tier 2: Direct Gemini API (if Gemini API Key configured or using project key if enabled)
+    const geminiKeyToTry = state.aiSettings?.geminiApiKey || firebaseConfig.apiKey;
+    if (geminiKeyToTry) {
+        try {
+            const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiKeyToTry}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contents: [{
+                        parts: [
+                            { text: prompt },
+                            {
+                                inlineData: {
+                                    mimeType: mimeType,
+                                    data: base64Audio
+                                }
+                            }
+                        ]
+                    }],
+                    generationConfig: {
+                        temperature: 0.1
+                    }
+                })
+            });
+
+            if (resp.ok) {
+                const data = await resp.json();
+                const aiText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (aiText !== undefined && aiText.trim()) {
+                    return applyMedicalPostProcessing(aiText.trim());
+                }
+            }
+        } catch (e) {
+            console.warn('Direct Gemini API call failed:', e);
+        }
+    }
+
+    // Tier 3: Firebase Vertex AI in Firebase SDK (uses authenticated Firebase project)
+    try {
+        const vertexAI = getVertexAI(firebaseApp);
+        const model = getGenerativeModel(vertexAI, { model: 'gemini-2.0-flash' });
+        const result = await model.generateContent([
+            prompt,
+            {
+                inlineData: {
+                    mimeType: mimeType,
+                    data: base64Audio
+                }
+            }
+        ]);
+        const responseText = result.response.text();
+        if (responseText && responseText.trim()) {
+            return applyMedicalPostProcessing(responseText.trim());
+        }
+    } catch (e) {
+        console.warn('Firebase Vertex AI fallback info:', e.message || e);
+    }
+
+    return null;
+}
+
+async function acquireWakeLock() {
+    if ('wakeLock' in navigator) {
+        try {
+            state.wakeLock = await navigator.wakeLock.request('screen');
+        } catch (e) {
+            console.warn('WakeLock request failed:', e);
+        }
+    }
+}
+
+function releaseWakeLock() {
+    if (state.wakeLock) {
+        state.wakeLock.release().catch(() => {});
+        state.wakeLock = null;
+    }
+}
+
+// ============================================================
 // AUDIO RECORDING
 // ============================================================
 
 async function startRecording() {
     try {
+        // Stop any active playback before recording
+        stopPlayback();
+
         state.audioChunks = [];
         state.audioBlob = null;
         state.transcript = '';
+        state.interimTranscript = '';
         state.lastFinalEndTime = Date.now();
         state.currentSegmentStartTime = null;
         els.transcriptText.textContent = '';
         els.transcriptText.classList.add('hidden');
+        els.transcriptPlaceholder.textContent = 'Spreche, um Text zu sehen...';
         els.transcriptPlaceholder.classList.remove('hidden');
         els.transcriptPreview.classList.remove('hidden');
+        if (els.aiTranscriptBadge) els.aiTranscriptBadge.classList.add('hidden');
 
-        // Initialize Speech Recognition
-        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            state.recognition = new SpeechRecognition();
-            state.recognition.continuous = true;
-            state.recognition.interimResults = true;
-            state.recognition.lang = 'de-DE';
+        // Keep screen awake during dictation
+        await acquireWakeLock();
 
-            state.recognition.onresult = (event) => {
-                let interimTranscript = '';
-
-                for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    const result = event.results[i];
-                    const transcriptPart = result[0].transcript;
-
-                    if (result.isFinal) {
-                        let text = transcriptPart.trim();
-
-                        // Magic Words: "Zeile" -> \n, "Absatz" -> \n\n
-                        // Using word boundaries \b to avoid matching inside other words
-                        text = text.replace(/\bzeile\b/gi, '\n');
-                        text = text.replace(/\babsatz\b/gi, '\n\n');
-
-                        // Fachbegriffe korrigieren
-                        const termsToUse = state.technicalTerms && Object.keys(state.technicalTerms).length > 0
-                            ? state.technicalTerms
-                            : TECHNICAL_TERMS_MAPPING;
-
-                        for (const [wrong, correct] of Object.entries(termsToUse)) {
-                            // Erstelle Regex für das falsche Wort (case insensitive, word boundaries)
-                            const escapedWrong = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                            const regex = new RegExp(`\\b${escapedWrong}\\b`, 'gi');
-                            text = text.replace(regex, correct);
-                        }
-
-                        // Clean up potential double newlines if trimmed
-                        // If text became ONLY whitespace/newlines, we keep it?
-                        // "Neue Zeile" -> "\n".  trim() would make it empty?
-                        // No, we trimmed BEFORE replace.
-                        // But now text contains "\n".
-                        // Wait, my logic below says: if (text) ...
-                        // If text is "\n", it is truthy.
-
-                        if (text) {
-                            let prefix = ' ';
-                            if (state.lastFinalEndTime > 0) {
-                                const segmentStart = state.currentSegmentStartTime || Date.now();
-                                // If pause > 0.4s (adjusted for API latency), insert semicolon
-                                // But NOT if we just inserted a newline via magic word!
-                                // Check if text starts with \n?
-                                if (!text.startsWith('\n') && (segmentStart - state.lastFinalEndTime > 400)) {
-                                    prefix = '; ';
-                                }
-                            }
-
-                            // Prevent semicolon at the start of a new line
-                            if (state.transcript === '' || text.startsWith('\n') || state.transcript.endsWith('\n')) prefix = '';
-
-                            state.transcript += prefix + text;
-                            state.lastFinalEndTime = Date.now();
-                        }
-                        state.currentSegmentStartTime = null;
-                    } else {
-                        interimTranscript += transcriptPart;
-                        if (!state.currentSegmentStartTime) {
-                            state.currentSegmentStartTime = Date.now();
-                        }
-                    }
-                }
-
-                els.transcriptText.innerHTML = `${state.transcript} <span style="color:var(--text-muted)">${interimTranscript}</span>`;
-                els.transcriptText.classList.remove('hidden');
-                els.transcriptPlaceholder.classList.add('hidden');
-                // Auto-scroll to bottom
-                els.transcriptPreview.scrollTop = els.transcriptPreview.scrollHeight;
-            };
-
-            state.recognition.onerror = (event) => {
-                console.warn('Speech recognition error', event.error);
-            };
-
-            state.recognition.start();
-        } else {
-            console.log('Speech recognition not supported in this browser.');
-            els.transcriptPlaceholder.textContent = 'Transkription in diesem Browser nicht verfügbar.';
-        }
-
-        // Request microphone access
+        // 1. Request microphone access FIRST (prevents iOS/Safari permission race condition)
         state.mediaStream = await navigator.mediaDevices.getUserMedia({
             audio: {
                 echoCancellation: true,
                 noiseSuppression: true,
-                autoGainControl: true
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 48000
             }
         });
 
-        // Set up audio analyser for visualizer
+        // 2. Set up Web Audio API preprocessing pipeline (Noise Reduction + Voice Boost + Visualizer)
         const AudioContext = window.AudioContext || window.webkitAudioContext;
 
-        // Reuse context if available (Singleton pattern)
         if (!state.audioContext || state.audioContext.state === 'closed') {
             try {
-                // Ensure no old one lingers (just safe check)
                 if (state.audioContext) state.audioContext.close().catch(() => { });
                 state.audioContext = new AudioContext();
             } catch (e) {
@@ -1456,17 +1687,68 @@ async function startRecording() {
             }
         }
 
-        // Resume context on iOS (critical after suspend/pause)
-        if (state.audioContext.state === 'suspended') {
+        if (state.audioContext && state.audioContext.state === 'suspended') {
             await state.audioContext.resume().catch(e => console.warn('Resume warning:', e));
         }
 
-        const source = state.audioContext.createMediaStreamSource(state.mediaStream);
-        state.analyserNode = state.audioContext.createAnalyser();
-        state.analyserNode.fftSize = 256;
-        source.connect(state.analyserNode);
+        let streamToRecord = state.mediaStream;
 
-        // Choose best supported MIME type
+        if (state.audioContext) {
+            const source = state.audioContext.createMediaStreamSource(state.mediaStream);
+            state.analyserNode = state.audioContext.createAnalyser();
+            state.analyserNode.fftSize = 256;
+
+            if (state.aiSettings?.enableNoiseFilter !== false && state.audioContext.createMediaStreamDestination) {
+                try {
+                    // High-pass filter at 85 Hz: removes ambulance engine rumble, road noise & microphone handling thumps
+                    const highPass = state.audioContext.createBiquadFilter();
+                    highPass.type = 'highpass';
+                    highPass.frequency.value = 85;
+                    highPass.Q.value = 0.7;
+
+                    // Low-pass filter at 7500 Hz: removes high-frequency hiss & electronic whine
+                    const lowPass = state.audioContext.createBiquadFilter();
+                    lowPass.type = 'lowpass';
+                    lowPass.frequency.value = 7500;
+                    lowPass.Q.value = 0.7;
+
+                    // Presence boost at 2800 Hz (+3 dB) for clear consonant & medical term articulation
+                    const presenceFilter = state.audioContext.createBiquadFilter();
+                    presenceFilter.type = 'peaking';
+                    presenceFilter.frequency.value = 2800;
+                    presenceFilter.Q.value = 1.0;
+                    presenceFilter.gain.value = 3.0;
+
+                    // Dynamics Compressor: evens out volume differences and prevents clipping in loud environments
+                    const compressor = state.audioContext.createDynamicsCompressor();
+                    compressor.threshold.value = -24;
+                    compressor.knee.value = 30;
+                    compressor.ratio.value = 4;
+                    compressor.attack.value = 0.003;
+                    compressor.release.value = 0.25;
+
+                    const destination = state.audioContext.createMediaStreamDestination();
+
+                    source.connect(highPass);
+                    highPass.connect(presenceFilter);
+                    presenceFilter.connect(lowPass);
+                    lowPass.connect(compressor);
+                    compressor.connect(state.analyserNode);
+                    compressor.connect(destination);
+
+                    if (destination.stream && destination.stream.getAudioTracks().length > 0) {
+                        streamToRecord = destination.stream;
+                    }
+                } catch (filterErr) {
+                    console.warn('Audio filter chain fallback to raw stream:', filterErr);
+                    source.connect(state.analyserNode);
+                }
+            } else {
+                source.connect(state.analyserNode);
+            }
+        }
+
+        // 3. Choose best supported MIME type with high-clarity bitrate (64 kbps)
         const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
             ? 'audio/webm;codecs=opus'
             : MediaRecorder.isTypeSupported('audio/mp4')
@@ -1475,83 +1757,229 @@ async function startRecording() {
                     ? 'audio/ogg;codecs=opus'
                     : '';
 
-        const options = mimeType ? { mimeType } : {};
-        state.mediaRecorder = new MediaRecorder(state.mediaStream, options);
+        const recorderOptions = mimeType ? { mimeType, audioBitsPerSecond: 64000 } : { audioBitsPerSecond: 64000 };
+        try {
+            state.mediaRecorder = new MediaRecorder(streamToRecord, recorderOptions);
+        } catch (recErr) {
+            // Fallback to raw mediaStream with default options if filtered stream or bitrate is rejected on older iOS
+            const fallbackOptions = mimeType ? { mimeType } : {};
+            state.mediaRecorder = new MediaRecorder(state.mediaStream, fallbackOptions);
+        }
 
         state.mediaRecorder.ondataavailable = (e) => {
-            if (e.data.size > 0) {
+            if (e.data && e.data.size > 0) {
                 state.audioChunks.push(e.data);
             }
         };
 
-        // onstop is set dynamically in stopRecording() to support Promise-based waiting
-
-        state.mediaRecorder.start(100); // Collect data every 100ms
+        state.mediaRecorder.start(250); // Collect data every 250ms
         state.isRecording = true;
         state.recordingStartTime = Date.now();
 
+        // 4. Initialize Live Speech Recognition with Auto-Restart Watchdog
+        initLiveSpeechRecognition();
+
         // Update UI
         els.recordBtn.classList.add('recording');
-        els.recordStatus.textContent = '● Aufnahme läuft…';
+        els.recordStatus.textContent = '● Aufnahme läuft… (Rauschfilter aktiv)';
         els.recordStatus.classList.add('recording-active');
         els.recordDiscardBtn.classList.remove('hidden');
         els.recordDoneBtn.classList.remove('hidden');
 
-        // Start timer
+        // Start timer & visualizer
         state.timerInterval = setInterval(updateRecordingTimer, 100);
-
-        // Start visualizer
         updateVisualizer();
 
     } catch (error) {
         console.error('Error starting recording:', error);
+        releaseWakeLock();
         if (error.name === 'NotAllowedError') {
             showToast('Mikrofonzugriff nicht erlaubt. Bitte in den Einstellungen aktivieren.', 'error');
         } else {
-            showToast('Fehler beim Starten der Aufnahme', 'error');
+            showToast('Fehler beim Starten der Aufnahme: ' + error.message, 'error');
         }
+    }
+}
+
+function initLiveSpeechRecognition() {
+    if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+        els.transcriptPlaceholder.textContent = 'Live-Vorschau im Browser nicht verfügbar (Audio wird gespeichert).';
+        return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 3;
+    recognition.lang = 'de-DE';
+
+    state.recognition = recognition;
+
+    recognition.onresult = (event) => {
+        let currentInterim = '';
+
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const result = event.results[i];
+
+            // Pick alternative that best matches medical vocabulary if confidence is close
+            let bestTranscript = result[0].transcript;
+            if (result.length > 1) {
+                const vocabKeys = Object.keys({ ...TECHNICAL_TERMS_MAPPING, ...(state.technicalTerms || {}) });
+                for (let altIdx = 0; altIdx < result.length; altIdx++) {
+                    const candidate = result[altIdx].transcript.toLowerCase();
+                    if (vocabKeys.some(k => k.length > 2 && candidate.includes(k))) {
+                        bestTranscript = result[altIdx].transcript;
+                        break;
+                    }
+                }
+            }
+
+            if (result.isFinal) {
+                let text = applyMedicalPostProcessing(bestTranscript.trim());
+
+                if (text) {
+                    let prefix = ' ';
+                    if (state.lastFinalEndTime > 0) {
+                        const segmentStart = state.currentSegmentStartTime || Date.now();
+                        if (!text.startsWith('\n') && !text.startsWith(';') && (segmentStart - state.lastFinalEndTime > 450)) {
+                            prefix = '; ';
+                        }
+                    }
+
+                    if (state.transcript === '' || text.startsWith('\n') || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) {
+                        prefix = '';
+                    }
+
+                    state.transcript += prefix + text;
+                    state.lastFinalEndTime = Date.now();
+                }
+                state.currentSegmentStartTime = null;
+            } else {
+                currentInterim += bestTranscript;
+                if (!state.currentSegmentStartTime) {
+                    state.currentSegmentStartTime = Date.now();
+                }
+            }
+        }
+
+        state.interimTranscript = currentInterim;
+        renderLiveTranscriptPreview();
+    };
+
+    recognition.onerror = (event) => {
+        // Ignore harmless no-speech or aborted events during auto-restart
+        if (event.error === 'no-speech' || event.error === 'aborted') {
+            return;
+        }
+        console.warn('Speech recognition warning:', event.error);
+    };
+
+    // Crucial Watchdog: Browser SpeechRecognition stops after silence or ~60s on mobile.
+    // If state.isRecording is still true, flush any pending interim text and restart seamlessly!
+    recognition.onend = () => {
+        if (state.isRecording && state.recognition === recognition) {
+            if (state.interimTranscript && state.interimTranscript.trim()) {
+                const flushed = applyMedicalPostProcessing(state.interimTranscript.trim());
+                if (flushed) {
+                    const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
+                    state.transcript += prefix + flushed;
+                    state.lastFinalEndTime = Date.now();
+                }
+                state.interimTranscript = '';
+                renderLiveTranscriptPreview();
+            }
+            setTimeout(() => {
+                if (state.isRecording && state.recognition === recognition) {
+                    try {
+                        recognition.start();
+                    } catch (e) {
+                        console.warn('SpeechRecognition restart error:', e);
+                    }
+                }
+            }, 120);
+        }
+    };
+
+    try {
+        recognition.start();
+    } catch (e) {
+        console.warn('Could not start SpeechRecognition:', e);
+    }
+}
+
+function renderLiveTranscriptPreview() {
+    const finalHtml = escapeHtml(state.transcript);
+    const interimHtml = escapeHtml(state.interimTranscript || '');
+    if (finalHtml || interimHtml) {
+        els.transcriptText.innerHTML = `${finalHtml}${interimHtml ? ` <span style="color:var(--text-muted)">${interimHtml}</span>` : ''}`;
+        els.transcriptText.classList.remove('hidden');
+        els.transcriptPlaceholder.classList.add('hidden');
+        els.transcriptPreview.scrollTop = els.transcriptPreview.scrollHeight;
     }
 }
 
 function stopRecording() {
     return new Promise((resolve) => {
+        releaseWakeLock();
+
         if (state.mediaRecorder && state.isRecording) {
+            state.isRecording = false;
+
             // Capture duration before stopping
             state.recordingDuration = state.recordingStartTime
                 ? (Date.now() - state.recordingStartTime) / 1000
                 : 0;
 
+            // Flush any remaining interim transcript that hasn't been finalized yet!
+            if (state.interimTranscript && state.interimTranscript.trim()) {
+                const flushed = applyMedicalPostProcessing(state.interimTranscript.trim());
+                if (flushed) {
+                    const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
+                    state.transcript += prefix + flushed;
+                }
+                state.interimTranscript = '';
+                renderLiveTranscriptPreview();
+            }
+
+            // Stop Speech Recognition cleanly
+            if (state.recognition) {
+                const rec = state.recognition;
+                state.recognition = null; // Prevent onend watchdog from restarting
+                try {
+                    rec.stop();
+                } catch (e) { }
+            }
+
             // Set onstop to create the blob and resolve the promise
             state.mediaRecorder.onstop = () => {
-                state.audioBlob = new Blob(state.audioChunks, { type: state.mediaRecorder.mimeType });
+                const actualMime = state.mediaRecorder.mimeType || 'audio/webm';
+                state.audioBlob = new Blob(state.audioChunks, { type: actualMime });
+
+                // Stop the media stream tracks AFTER recorder has flushed all chunks
+                if (state.mediaStream) {
+                    state.mediaStream.getTracks().forEach(track => track.stop());
+                    state.mediaStream = null;
+                }
+
+                // Suspend audio context instead of closing (Singleton pattern for iOS)
+                if (state.audioContext && state.audioContext.state !== 'closed') {
+                    try {
+                        state.audioContext.suspend().catch(e => console.warn('Context suspend warning:', e));
+                    } catch (e) {
+                        console.warn(e);
+                    }
+                    state.analyserNode = null;
+                }
+
                 resolve(state.audioBlob);
             };
 
-            state.mediaRecorder.stop();
-            state.isRecording = false;
-
-            // Stop Speech Recognition
-            if (state.recognition) {
-                state.recognition.stop();
-                state.recognition = null;
-            }
-
-            // Stop the media stream
-            if (state.mediaStream) {
-                state.mediaStream.getTracks().forEach(track => track.stop());
-                state.mediaStream = null;
-            }
-
-            // Suspend audio context instead of closing (Singleton pattern for iOS)
-            if (state.audioContext && state.audioContext.state !== 'closed') {
-                try {
-                    state.audioContext.suspend().catch(e => console.warn('Context suspend warning:', e));
-                } catch (e) {
-                    console.warn(e);
-                }
-                // Keep context alive, but reset analyser reference to force recreation or just leave it?
-                // Better to nullify analyserNode so we know to recreate it attached to new source
-                state.analyserNode = null;
+            try {
+                state.mediaRecorder.stop();
+            } catch (e) {
+                console.warn('Recorder stop error:', e);
+                resolve(state.audioBlob);
             }
 
             // Clear timer
@@ -2160,7 +2588,7 @@ function showCategoryForm(category = null) {
     renderIconPicker();
 }
 
-function showSaveForm() {
+async function showSaveForm() {
     if (!state.audioBlob) {
         showToast('Keine Aufnahme vorhanden', 'error');
         return;
@@ -2170,10 +2598,93 @@ function showSaveForm() {
     els.saveForm.classList.remove('hidden');
     renderCategorySelect();
 
-    // Fill text area with captured transcript
-    els.noteTranscript.value = state.transcript.trim();
+    // Fill text area with captured live transcript immediately (processed with medical dictionary)
+    const initialDraft = applyMedicalPostProcessing(state.transcript.trim());
+    els.noteTranscript.value = initialDraft;
 
-    els.noteTitle.focus();
+    if (!state.isAppending) {
+        els.noteTitle.focus();
+    }
+
+    // Automatically run AI high-precision audio transcription in background if online
+    await runAiTranscriptionPass(false);
+}
+
+async function runAiTranscriptionPass(isManualTrigger = false) {
+    if (!state.audioBlob || state.isTranscribingAI) return;
+    if (!navigator.onLine) {
+        if (isManualTrigger) showToast('Offline – KI-Transkription benötigt Internet', 'info');
+        return;
+    }
+
+    state.isTranscribingAI = true;
+    const origBtnText = els.retranscribeAiBtn ? els.retranscribeAiBtn.innerHTML : '🎙️ KI-Präzision';
+    if (els.retranscribeAiBtn) {
+        els.retranscribeAiBtn.innerHTML = '⏳ KI analysiert Audio…';
+        els.retranscribeAiBtn.disabled = true;
+    }
+
+    try {
+        const currentText = els.noteTranscript.value.trim();
+        const aiTranscript = await transcribeWithAI(state.audioBlob, currentText);
+
+        if (aiTranscript && aiTranscript.trim()) {
+            els.noteTranscript.value = aiTranscript.trim();
+            state.transcript = aiTranscript.trim();
+            if (els.aiTranscriptBadge) {
+                els.aiTranscriptBadge.classList.remove('hidden');
+            }
+            if (isManualTrigger) {
+                showToast('Audio erfolgreich mit medizinischer KI transkribiert!', 'success');
+            }
+        } else if (isManualTrigger) {
+            // Even if cloud AI isn't configured with a dedicated key yet, re-apply medical post-processing dictionary
+            const refined = applyMedicalPostProcessing(els.noteTranscript.value);
+            els.noteTranscript.value = refined;
+            showToast('Medizinisches Fachwörterbuch angewendet (für Cloud-Audio-KI optional API-Key in Einstellungen hinterlegen)', 'info');
+        }
+    } catch (e) {
+        console.warn('AI pass error:', e);
+        if (isManualTrigger) {
+            showToast('KI-Analyse nicht erreichbar, nutze Live-Transkript', 'error');
+        }
+    } finally {
+        state.isTranscribingAI = false;
+        if (els.retranscribeAiBtn) {
+            els.retranscribeAiBtn.innerHTML = origBtnText;
+            els.retranscribeAiBtn.disabled = false;
+        }
+    }
+}
+
+function updateAiSettingsStatusUI() {
+    if (!els.aiEngineStatusBadge || !els.aiEngineStatusDesc) return;
+    const hasGroq = !!(state.aiSettings?.groqApiKey);
+    const hasGemini = !!(state.aiSettings?.geminiApiKey);
+    const filterActive = state.aiSettings?.enableNoiseFilter !== false;
+
+    if (hasGroq || hasGemini) {
+        els.aiEngineStatusBadge.textContent = 'Cloud-KI + Live Hybrid';
+        els.aiEngineStatusBadge.style.background = 'rgba(52, 211, 153, 0.2)';
+        els.aiEngineStatusBadge.style.color = 'var(--success)';
+        const engines = [];
+        if (hasGroq) engines.push('Groq Whisper Large v3');
+        if (hasGemini) engines.push('Gemini 2.5 Flash Audio');
+        els.aiEngineStatusDesc.textContent = `Aktive KI-Modelle: ${engines.join(' & ')} + Live-Erkennung (${Object.keys(state.technicalTerms || {}).length} medizinische Fachbegriffe) ${filterActive ? '+ RTW-Störgeräuschfilter (85Hz–7.5kHz)' : ''}.`;
+    } else {
+        els.aiEngineStatusBadge.textContent = 'Live-Hybrid + Fachwörterbuch';
+        els.aiEngineStatusBadge.style.background = 'rgba(234, 179, 8, 0.2)';
+        els.aiEngineStatusBadge.style.color = 'var(--primary-light)';
+        els.aiEngineStatusDesc.textContent = `Aktiv: Stabilisierte Echtzeit-Spracherkennung mit Auto-Restart, ${Object.keys(state.technicalTerms || {}).length} medizinischen Fachbegriffen${filterActive ? ' & aktivem RTW-Störgeräuschfilter' : ''}. Für zusätzliche KI-Nachberechnung der Audiodatei kannst du unten kostenlose Gemini/Groq Keys hinterlegen.`;
+    }
+}
+
+function openAiSettingsModal() {
+    if (els.aiGeminiKey) els.aiGeminiKey.value = state.aiSettings?.geminiApiKey || '';
+    if (els.aiGroqKey) els.aiGroqKey.value = state.aiSettings?.groqApiKey || '';
+    if (els.aiNoiseFilterToggle) els.aiNoiseFilterToggle.checked = state.aiSettings?.enableNoiseFilter !== false;
+    updateAiSettingsStatusUI();
+    openModal(els.aiSettingsModal);
 }
 
 function showConfirmDialog(icon, title, message, onConfirm) {
@@ -2357,6 +2868,58 @@ function bindEvents() {
         els.userMenu.classList.remove('active');
         openCategoriesModal();
     });
+    if (els.btnAiSettings) {
+        els.btnAiSettings.addEventListener('click', () => {
+            els.userMenu.classList.remove('active');
+            openAiSettingsModal();
+        });
+    }
+    if (els.aiSettingsModalClose) {
+        els.aiSettingsModalClose.addEventListener('click', () => closeModal(els.aiSettingsModal));
+    }
+    if (els.aiSettingsModal) {
+        els.aiSettingsModal.addEventListener('click', (e) => {
+            if (e.target === els.aiSettingsModal) closeModal(els.aiSettingsModal);
+        });
+    }
+    if (els.aiSettingsSaveBtn) {
+        els.aiSettingsSaveBtn.addEventListener('click', async () => {
+            await saveAiSettings();
+            closeModal(els.aiSettingsModal);
+        });
+    }
+    if (els.aiSettingsTestBtn) {
+        els.aiSettingsTestBtn.addEventListener('click', async () => {
+            await saveAiSettings();
+            const gKey = state.aiSettings?.geminiApiKey || firebaseConfig.apiKey;
+            const groqKey = state.aiSettings?.groqApiKey;
+            els.aiSettingsTestBtn.textContent = 'Prüfe…';
+            els.aiSettingsTestBtn.disabled = true;
+            try {
+                let successMsg = [];
+                if (groqKey) {
+                    const r = await fetch('https://api.groq.com/openai/v1/models', {
+                        headers: { 'Authorization': `Bearer ${groqKey}` }
+                    });
+                    if (r.ok) successMsg.push('Groq Whisper v3 bereit');
+                }
+                if (gKey) {
+                    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash?key=${gKey}`);
+                    if (r.ok) successMsg.push('Gemini 2.5 Flash bereit');
+                }
+                if (successMsg.length > 0) {
+                    showToast(`Verbindung erfolgreich: ${successMsg.join(' & ')}`, 'success');
+                } else {
+                    showToast('Live-Hybrid & Medizin-Wörterbuch aktiv (für Cloud-KI bitte gültigen Gemini/Groq API-Key eingeben)', 'info');
+                }
+            } catch (err) {
+                showToast('Verbindungstest fehlgeschlagen: ' + err.message, 'error');
+            } finally {
+                els.aiSettingsTestBtn.textContent = 'Verbindung testen';
+                els.aiSettingsTestBtn.disabled = false;
+            }
+        });
+    }
     els.btnFaq.addEventListener('click', () => {
         els.userMenu.classList.remove('active');
         els.faqContent.innerHTML = FAQ_HTML;
@@ -2423,6 +2986,12 @@ function bindEvents() {
         els.transcriptPreview.classList.remove('hidden'); // Show preview again
     });
 
+    if (els.retranscribeAiBtn) {
+        els.retranscribeAiBtn.addEventListener('click', () => {
+            runAiTranscriptionPass(true);
+        });
+    }
+
     els.summarizeBtn.addEventListener('click', () => {
         const text = els.noteTranscript.value;
         const summarized = summarizeMaterials(text);
@@ -2479,6 +3048,8 @@ function bindEvents() {
                 closeCategoriesModal();
             } else if (els.faqModal.classList.contains('active')) {
                 closeModal(els.faqModal);
+            } else if (els.aiSettingsModal && els.aiSettingsModal.classList.contains('active')) {
+                closeModal(els.aiSettingsModal);
             }
         }
     });
@@ -2617,7 +3188,7 @@ async function initApp(user) {
     els.userMenuEmail.textContent = user.email || '';
 
     // Load data
-    await Promise.all([loadCategories(), loadNotes(), loadTechnicalTerms()]);
+    await Promise.all([loadCategories(), loadNotes(), loadTechnicalTerms(), loadAiSettings()]);
 
     // Color Migration (visual only, for old purple data)
     state.categories.forEach(c => {
@@ -2936,7 +3507,7 @@ function initTermsEvents() {
             // Correct existing transcript immediately
             const currentTranscript = els.noteTranscript.value;
             const escapedWrong = wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`\\b${escapedWrong}\\b`, 'gi');
+            const regex = new RegExp(`(?<![\\wÄÖÜäöüß])${escapedWrong}(?![\\wÄÖÜäöüß])`, 'gi');
 
             // Check if matches exist
             const matchCount = (currentTranscript.match(regex) || []).length;
