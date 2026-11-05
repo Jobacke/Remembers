@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.0.9';
+const APP_VERSION = '5.1.0';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -281,6 +281,8 @@ const state = {
     },
     wakeLock: null,
     interimTranscript: '',
+    sessionTranscriptBase: '',
+    sessionSegments: [],
     isTranscribingAI: false
 };
 
@@ -1656,6 +1658,8 @@ async function startRecording() {
         state.audioBlob = null;
         state.transcript = '';
         state.interimTranscript = '';
+        state.sessionTranscriptBase = '';
+        state.sessionSegments = [];
         state.lastFinalEndTime = Date.now();
         state.currentSegmentStartTime = null;
         els.transcriptText.textContent = '';
@@ -1819,11 +1823,55 @@ function initLiveSpeechRecognition() {
     recognition.lang = 'de-DE';
 
     state.recognition = recognition;
+    state.sessionTranscriptBase = '';
+    state.sessionSegments = [];
+
+    // Rebuilds state.transcript deterministically from sessionTranscriptBase + current session segments
+    // This completely prevents Safari/iOS and Android Chrome from duplicating text when re-firing result indices!
+    const rebuildTranscriptFromSession = () => {
+        let combined = state.sessionTranscriptBase || '';
+        let prevEndTime = 0;
+
+        for (let idx = 0; idx < state.sessionSegments.length; idx++) {
+            const seg = state.sessionSegments[idx];
+            if (!seg || !seg.text) continue;
+
+            let prefix = ' ';
+            if (prevEndTime > 0 && seg.startTime && (seg.startTime - prevEndTime > 450)) {
+                if (!seg.text.startsWith('\n') && !seg.text.startsWith(';')) {
+                    prefix = '; ';
+                }
+            } else if (idx === 0 && combined) {
+                prefix = (combined.endsWith('\n') || combined.endsWith('; ')) ? '' : '; ';
+            }
+
+            if (combined === '' || seg.text.startsWith('\n') || combined.endsWith('\n') || combined.endsWith('; ')) {
+                prefix = '';
+            }
+
+            // Guard against Android Chrome overlapping cumulative results (where result[i] contains result[i-1])
+            const prevSeg = idx > 0 ? state.sessionSegments[idx - 1] : null;
+            if (prevSeg && prevSeg.text && seg.text.toLowerCase().startsWith(prevSeg.text.toLowerCase())) {
+                const remainder = seg.text.slice(prevSeg.text.length).trim();
+                if (!remainder) continue;
+                combined += prefix + remainder;
+            } else if (prevSeg && prevSeg.text && prevSeg.text.toLowerCase() === seg.text.toLowerCase()) {
+                // Exact duplicate segment fired by mobile engine
+                continue;
+            } else {
+                combined += prefix + seg.text;
+            }
+
+            prevEndTime = seg.endTime || seg.startTime || Date.now();
+        }
+
+        state.transcript = combined;
+    };
 
     recognition.onresult = (event) => {
         let currentInterim = '';
 
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
+        for (let i = 0; i < event.results.length; ++i) {
             const result = event.results[i];
 
             // Pick alternative that best matches medical vocabulary if confidence is close
@@ -1841,25 +1889,22 @@ function initLiveSpeechRecognition() {
 
             if (result.isFinal) {
                 let text = applyMedicalPostProcessing(bestTranscript.trim());
-
-                if (text) {
-                    let prefix = ' ';
-                    if (state.lastFinalEndTime > 0) {
-                        const segmentStart = state.currentSegmentStartTime || Date.now();
-                        if (!text.startsWith('\n') && !text.startsWith(';') && (segmentStart - state.lastFinalEndTime > 450)) {
-                            prefix = '; ';
-                        }
-                    }
-
-                    if (state.transcript === '' || text.startsWith('\n') || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) {
-                        prefix = '';
-                    }
-
-                    state.transcript += prefix + text;
-                    state.lastFinalEndTime = Date.now();
-                }
+                const existing = state.sessionSegments[i];
+                state.sessionSegments[i] = {
+                    text: text,
+                    startTime: existing?.startTime || state.currentSegmentStartTime || Date.now(),
+                    endTime: existing?.endTime || Date.now()
+                };
                 state.currentSegmentStartTime = null;
             } else {
+                // Ensure we record startTime for this result slot when interim first arrives
+                if (!state.sessionSegments[i]) {
+                    state.sessionSegments[i] = {
+                        text: '',
+                        startTime: Date.now(),
+                        endTime: null
+                    };
+                }
                 currentInterim += bestTranscript;
                 if (!state.currentSegmentStartTime) {
                     state.currentSegmentStartTime = Date.now();
@@ -1867,7 +1912,16 @@ function initLiveSpeechRecognition() {
             }
         }
 
-        state.interimTranscript = currentInterim;
+        rebuildTranscriptFromSession();
+
+        // If interimTranscript is identical to the end of final transcript (Safari quirk), hide interim duplicate
+        const cleanInterim = applyMedicalPostProcessing(currentInterim.trim());
+        if (cleanInterim && state.transcript.toLowerCase().endsWith(cleanInterim.toLowerCase())) {
+            state.interimTranscript = '';
+        } else {
+            state.interimTranscript = currentInterim;
+        }
+
         renderLiveTranscriptPreview();
     };
 
@@ -1880,19 +1934,22 @@ function initLiveSpeechRecognition() {
     };
 
     // Crucial Watchdog: Browser SpeechRecognition stops after silence or ~60s on mobile.
-    // If state.isRecording is still true, flush any pending interim text and restart seamlessly!
+    // If state.isRecording is still true, commit current session to base and restart seamlessly!
     recognition.onend = () => {
         if (state.isRecording && state.recognition === recognition) {
             if (state.interimTranscript && state.interimTranscript.trim()) {
                 const flushed = applyMedicalPostProcessing(state.interimTranscript.trim());
-                if (flushed) {
+                if (flushed && !state.transcript.toLowerCase().endsWith(flushed.toLowerCase())) {
                     const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
                     state.transcript += prefix + flushed;
-                    state.lastFinalEndTime = Date.now();
                 }
                 state.interimTranscript = '';
-                renderLiveTranscriptPreview();
             }
+            // Lock in current session transcript as the base for the next recognition session
+            state.sessionTranscriptBase = state.transcript;
+            state.sessionSegments = [];
+            renderLiveTranscriptPreview();
+
             setTimeout(() => {
                 if (state.isRecording && state.recognition === recognition) {
                     try {
@@ -1935,24 +1992,29 @@ function stopRecording() {
                 ? (Date.now() - state.recordingStartTime) / 1000
                 : 0;
 
-            // Flush any remaining interim transcript that hasn't been finalized yet!
-            if (state.interimTranscript && state.interimTranscript.trim()) {
-                const flushed = applyMedicalPostProcessing(state.interimTranscript.trim());
-                if (flushed) {
-                    const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
-                    state.transcript += prefix + flushed;
-                }
-                state.interimTranscript = '';
-                renderLiveTranscriptPreview();
-            }
+            // Stop Speech Recognition FIRST and detach handlers so rec.stop() doesn't fire a duplicate final onresult!
+            const pendingInterim = state.interimTranscript ? state.interimTranscript.trim() : '';
+            state.interimTranscript = '';
 
-            // Stop Speech Recognition cleanly
             if (state.recognition) {
                 const rec = state.recognition;
                 state.recognition = null; // Prevent onend watchdog from restarting
+                rec.onresult = null;
+                rec.onend = null;
+                rec.onerror = null;
                 try {
                     rec.stop();
                 } catch (e) { }
+            }
+
+            // Flush any remaining interim transcript only if it wasn't already finalized at the end of state.transcript
+            if (pendingInterim) {
+                const flushed = applyMedicalPostProcessing(pendingInterim);
+                if (flushed && !state.transcript.toLowerCase().endsWith(flushed.toLowerCase())) {
+                    const prefix = (state.transcript === '' || state.transcript.endsWith('\n') || state.transcript.endsWith('; ')) ? '' : '; ';
+                    state.transcript += prefix + flushed;
+                }
+                renderLiveTranscriptPreview();
             }
 
             // Set onstop to create the blob and resolve the promise
