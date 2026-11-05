@@ -3,7 +3,7 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.1.3';
+const APP_VERSION = '5.1.4';
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -467,68 +467,83 @@ function showToast(message, type = 'info') {
 function summarizeMaterials(text) {
     if (!text) return text;
 
-    const lines = text.split('\n');
-    let outLines = [];
+    // First pass: convert number words ("fünf Decken" -> "5 x Decken") and normalize "5xDecken" -> "5 x Decken"
+    let prepared = applyMedicalPostProcessing(text);
 
-    for (let line of lines) {
-        if (!/\d/.test(line)) {
-            outLines.push(line);
-            continue;
-        }
+    const lines = prepared.split('\n');
+    const introLines = [];
+    const bodyLines = [];
+    let foundFirstItemLine = false;
 
-        let parts = line.split(/;/);
-        let itemMap = new Map();
-        let itemOrder = [];
-        let nonItems = [];
+    const hasQuantityPattern = (str) => /\b\d+\s*(?:[xX×]|mal)?\s*[A-Za-zÄÖÜäöüß]{2,}/i.test(str);
 
-        let regex = /^\s*(\d+)\s*(?:[xX×]\s*)*(.+?)\s*$/i;
-
-        for (let part of parts) {
-            part = part.trim();
-            if (!part) continue;
-
-            // Sub-split e.g. "2 x Laken 2 x Decken" -> ["2 x Laken", "2 x Decken"]
-            let subParts = part.split(/\s+(?=\d+\s*x\s+[A-Za-zÄÖÜäöüß]|\d+\s*(?:x\s*)?[A-ZÄÖÜ])/);
-
-            for (let sub of subParts) {
-                sub = sub.trim();
-                if (!sub) continue;
-
-                let match = sub.match(regex);
-                if (match) {
-                    let qty = parseInt(match[1], 10);
-                    let rawName = match[2].trim();
-                    let normName = rawName.toLowerCase().replace(/\s+/g, ' ');
-
-                    if (itemMap.has(normName)) {
-                        itemMap.get(normName).qty += qty;
-                    } else {
-                        itemMap.set(normName, { qty: qty, rawName: rawName });
-                        itemOrder.push(normName);
-                    }
-                } else {
-                    nonItems.push(sub);
-                }
-            }
-        }
-
-        if (itemOrder.length === 0) {
-            outLines.push(line);
+    for (const line of lines) {
+        if (!foundFirstItemLine && !hasQuantityPattern(line)) {
+            introLines.push(line);
         } else {
-            let combined = [];
-            if (nonItems.length > 0) {
-                combined.push(nonItems.join('; '));
-            }
-            let summarizedItems = itemOrder.map(name => {
-                let item = itemMap.get(name);
-                return `${item.qty} x ${item.rawName}`;
-            });
-            combined.push(summarizedItems.join('; '));
-            outLines.push(combined.join('; '));
+            foundFirstItemLine = true;
+            bodyLines.push(line);
         }
     }
 
-    return outLines.join('\n');
+    if (!foundFirstItemLine) {
+        return text;
+    }
+
+    // Global map across ALL body lines (so multi-line or appended recordings are summed together!)
+    const itemMap = new Map();
+    const itemOrder = [];
+    const nonItems = [];
+
+    // Match e.g. "5 x Decken", "5xDecken", "5 Decken", "2 mal Laken"
+    const itemRegex = /^\s*(\d+)\s*(?:(?:[xX×]|mal)\s*)*([A-Za-zÄÖÜäöüß].*?)\s*$/i;
+
+    const fullBody = bodyLines.join('; ');
+    // Split by ';', ',', ' und ' (before a digit), or whitespace before a new '<digit> x <word>' / '<digit> <CapitalWord>'
+    const rawParts = fullBody
+        .split(/;|,|\s+\bund\b\s+(?=\d)|\s+(?=\d+\s*(?:[xX×]|mal)\s*[A-Za-zÄÖÜäöüß]|\d+\s+[A-ZÄÖÜ][A-Za-zÄÖÜäöüß])/i);
+
+    for (let part of rawParts) {
+        part = part.replace(/[;,.]+$/, '').trim();
+        if (!part) continue;
+
+        const match = part.match(itemRegex);
+        if (match) {
+            const qty = parseInt(match[1], 10);
+            const rawName = match[2].replace(/[;,.]+$/, '').trim();
+            const normName = rawName.toLowerCase().replace(/\s+/g, ' ');
+
+            if (itemMap.has(normName)) {
+                itemMap.get(normName).qty += qty;
+            } else {
+                itemMap.set(normName, { qty, rawName });
+                itemOrder.push(normName);
+            }
+        } else {
+            nonItems.push(part);
+        }
+    }
+
+    if (itemOrder.length === 0) {
+        return text;
+    }
+
+    const combinedBody = [];
+    if (nonItems.length > 0) {
+        combinedBody.push(nonItems.join('; '));
+    }
+
+    const summarizedItems = itemOrder.map(name => {
+        const item = itemMap.get(name);
+        return `${item.qty} x ${item.rawName}`;
+    });
+    combinedBody.push(summarizedItems.join('; ') + ';');
+
+    const bodyResult = combinedBody.join('; ');
+    if (introLines.length > 0) {
+        return [...introLines, bodyResult].join('\n');
+    }
+    return bodyResult;
 }
 
 // ============================================================
@@ -1023,9 +1038,13 @@ async function appendNote(noteId, audioBlob, duration, transcript, isSync = fals
             createdAt: Date.now()
         });
 
-        // Update Total Duration and Transcript
+        // Update Total Duration and Transcript (preserve edited/summarized noteData.transcript!)
         const newTotalDuration = segments.reduce((acc, seg) => acc + (seg.duration || 0), 0);
-        const newTotalTranscript = segments.map(s => s.transcript).filter(t => t).join('\n');
+        const existingTranscript = (noteData.transcript || '').trim();
+        const appendedText = (transcript || '').trim();
+        const newTotalTranscript = existingTranscript && appendedText
+            ? `${existingTranscript}\n${appendedText}`
+            : (existingTranscript || appendedText);
 
         await updateDoc(noteRef, {
             audioSegments: segments,
@@ -1124,17 +1143,40 @@ function toggleTitleEdit(noteId) {
 
 async function saveTranscript(noteId, newText) {
     try {
+        const note = state.notes.find(n => n.id === noteId);
+        if (note) {
+            note.transcript = newText;
+        }
         const noteRef = doc(db, 'users', state.user.uid, 'notes', noteId);
-        await updateDoc(noteRef, {
+        const updatePayload = {
             transcript: newText,
             updatedAt: serverTimestamp()
-        });
+        };
+        if (note && Array.isArray(note.audioSegments) && note.audioSegments.length > 0) {
+            updatePayload.audioSegments = note.audioSegments.map((seg, idx) => ({
+                ...seg,
+                transcript: idx === 0 ? newText : ''
+            }));
+        }
+        await updateDoc(noteRef, updatePayload);
         showToast('Transkript gespeichert', 'success');
         await loadNotes();
         renderNotes();
     } catch (error) {
         console.error('Error saving transcript:', error);
         showToast('Fehler beim Speichern', 'error');
+    }
+}
+
+async function summarizeNoteDirectly(noteId) {
+    const note = state.notes.find(n => n.id === noteId);
+    if (!note || !note.transcript) return;
+    const summarized = summarizeMaterials(note.transcript);
+    if (summarized.trim() !== note.transcript.trim()) {
+        await saveTranscript(noteId, summarized);
+        showToast('Mengen erfolgreich zusammengefasst!', 'success');
+    } else {
+        showToast('Keine weiteren aufsummierbaren Mengen gefunden.', 'info');
     }
 }
 
@@ -1447,15 +1489,14 @@ function applyMedicalPostProcessing(rawText) {
     text = text.replace(/\b(?:semikolon|strichpunkt)\b/gi, '; ');
 
     // 2. Number words before "mal" or "x" or medical items: e.g. "zwei mal" -> "2 x", "dreimal" -> "3 x"
-    text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)\s*(?:mal|x)\b/gi, (m, numWord) => {
+    text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|fünfzehn|zwanzig)\s*(?:mal|x)\b/gi, (m, numWord) => {
         const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
         return `${digit} x`;
     });
     text = text.replace(/\b(\d+)\s*(?:mal|x)\b/gi, '$1 x');
 
-    // Also convert standalone number words followed by common medical supplies or uppercase nouns (e.g. "zwei Laken" -> "2 x Laken")
-    // Negative lookahead (?!x\b|mal\b) prevents matching if "x" or "mal" is already there
-    text = text.replace(/\b(zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s+(?!x\b|mal\b)(?=[A-ZÄÖÜ][a-zäöüß]+)/gi, (m, numWord) => {
+    // Convert standalone number words followed by common medical supplies or uppercase nouns (e.g. "fünf Decken" -> "5 x Decken")
+    text = text.replace(/\b(ein|eine|einen|eins|zwei|zwo|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf|fünfzehn|zwanzig)\s+(?!x\b|mal\b|uhr\b)(?=[A-ZÄÖÜ][a-zäöüß]+)/gi, (m, numWord) => {
         const digit = NUMBER_WORDS_DE[numWord.toLowerCase()] || numWord;
         return `${digit} x `;
     });
@@ -1474,11 +1515,13 @@ function applyMedicalPostProcessing(rawText) {
         text = text.replace(regex, correct);
     }
 
-    // 4. Deduplicate accidental multiple "x" after numbers (e.g., if user term had "x System" or "5 x x System" -> "5 x System")
+    // 4. Normalize all "<digit>x<Word>", "<digit> x x <Word>", "<digit> <Noun>" into "<digit> x <Word>"
+    text = text.replace(/\b(\d+)\s*(?:(?:[xX×]|mal)\s*)+(?=[A-Za-zÄÖÜäöüß])/gi, '$1 x ');
+    text = text.replace(/\b(\d+)\s+(?!(?:[xX×]|mal|uhr|min|sek|std|mg|ml|mcg|µg|g|kg|l|dl|cm|mm|m|km|grad|prozent|bar|er|te|ten|ter)\b)([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]{1,})/g, '$1 x $2');
     text = text.replace(/\b(\d+)\s*(?:[xX×]\s*){2,}/g, '$1 x ');
 
-    // 5. Separate consecutive quantity items in one utterance with "; " (e.g. "2 x Laken 3 x Decken" or "2 x Laken, 3 x Decken" -> "2 x Laken; 3 x Decken")
-    text = text.replace(/([A-Za-zÄÖÜäöüß0-9%])\s*,?\s+(?=\d+\s*x\s+[A-Za-zÄÖÜäöüß])/g, '$1; ');
+    // 5. Separate consecutive quantity items in one utterance with "; " (e.g. "5 x Decken 2 x Decken" or "5 x Decken und 2 x Decken" -> "5 x Decken; 2 x Decken")
+    text = text.replace(/([A-Za-zÄÖÜäöüß0-9%])\s*(?:,|;|\bund\b)?\s+(?=\d+\s*x\s+[A-Za-zÄÖÜäöüß])/gi, '$1; ');
 
     // 6. Clean up spacing around punctuation & newlines
     text = text.replace(/[ \t]+\n/g, '\n');
@@ -1912,47 +1955,96 @@ function initLiveSpeechRecognition() {
 
         state.recognition = recognition;
         state.activeRecognition = recognition;
+        let lastResultEventTime = Date.now();
+
+        // Injects '; ' into cumulative iOS/Safari single-segment transcripts when the user pauses > 600ms between words
+        const applyPauseSplittingToSegment = (segObj, rawTranscript, now) => {
+            const trimmedRaw = rawTranscript.trim();
+            if (!trimmedRaw) return '';
+
+            if (!segObj.rawHistory) {
+                segObj.rawHistory = trimmedRaw;
+                segObj.withPauses = trimmedRaw;
+                return trimmedRaw;
+            }
+
+            const prevRaw = segObj.rawHistory;
+            if (trimmedRaw.toLowerCase() === prevRaw.toLowerCase()) {
+                return segObj.withPauses || trimmedRaw;
+            }
+
+            if (trimmedRaw.toLowerCase().startsWith(prevRaw.toLowerCase())) {
+                const addedPart = trimmedRaw.slice(prevRaw.length).trim();
+                if (addedPart) {
+                    const pauseDuration = now - lastResultEventTime;
+                    const baseWithPauses = (segObj.withPauses || prevRaw).replace(/[;,]+\s*$/, '').trim();
+                    if (pauseDuration > 550) {
+                        segObj.withPauses = `${baseWithPauses}; ${addedPart}`;
+                    } else {
+                        segObj.withPauses = `${baseWithPauses} ${addedPart}`;
+                    }
+                    segObj.rawHistory = trimmedRaw;
+                    return segObj.withPauses;
+                }
+            }
+
+            // Fallback if speech engine rewrote earlier words
+            segObj.rawHistory = trimmedRaw;
+            segObj.withPauses = trimmedRaw;
+            return trimmedRaw;
+        };
 
         recognition.onresult = (event) => {
-            let currentInterim = '';
+            const now = Date.now();
+            let currentInterimParts = [];
 
             for (let i = 0; i < event.results.length; ++i) {
                 const result = event.results[i];
                 const bestTranscript = result[0].transcript;
+                const existing = state.sessionSegments[i] || {
+                    text: '',
+                    rawHistory: '',
+                    withPauses: '',
+                    startTime: now,
+                    endTime: null
+                };
+
+                const pausedText = applyPauseSplittingToSegment(existing, bestTranscript, now);
 
                 if (result.isFinal) {
-                    let text = applyMedicalPostProcessing(bestTranscript.trim());
-                    const existing = state.sessionSegments[i];
+                    let text = applyMedicalPostProcessing(pausedText);
                     state.sessionSegments[i] = {
+                        ...existing,
                         text: text,
-                        startTime: existing?.startTime || state.currentSegmentStartTime || Date.now(),
-                        endTime: existing?.endTime || Date.now()
+                        endTime: existing.endTime || now
                     };
                     state.currentSegmentStartTime = null;
                 } else {
-                    if (!state.sessionSegments[i]) {
-                        state.sessionSegments[i] = {
-                            text: '',
-                            startTime: Date.now(),
-                            endTime: null
-                        };
-                    }
-                    currentInterim += bestTranscript;
+                    state.sessionSegments[i] = {
+                        ...existing,
+                        text: ''
+                    };
+                    currentInterimParts.push(pausedText);
                     if (!state.currentSegmentStartTime) {
-                        state.currentSegmentStartTime = Date.now();
+                        state.currentSegmentStartTime = now;
                     }
                 }
             }
 
+            lastResultEventTime = now;
             rebuildTranscriptFromSession();
 
-            // If interimTranscript is identical to the end of final transcript (Safari quirk), hide interim duplicate
-            const cleanInterim = applyMedicalPostProcessing(currentInterim.trim()).replace(/[;,]+\s*$/, '').trim();
+            const rawInterimCombined = currentInterimParts.join('; ').trim();
+            const processedInterim = rawInterimCombined
+                ? applyMedicalPostProcessing(rawInterimCombined).replace(/[;,]+\s*$/, '').trim() + '; '
+                : '';
+
+            const cleanInterim = processedInterim.replace(/[;,]+\s*$/, '').trim();
             const cleanFinal = state.transcript.replace(/[;,]+\s*$/, '').trim();
             if (cleanInterim && cleanFinal.toLowerCase().endsWith(cleanInterim.toLowerCase())) {
                 state.interimTranscript = '';
             } else {
-                state.interimTranscript = currentInterim;
+                state.interimTranscript = processedInterim;
             }
 
             renderLiveTranscriptPreview();
@@ -1985,9 +2077,14 @@ function initLiveSpeechRecognition() {
 
                 setTimeout(() => {
                     if (state.isRecording && state.recognition === recognition) {
-                        startFreshRecognitionSession();
+                        try {
+                            recognition.start();
+                            state.activeRecognition = recognition;
+                        } catch (e) {
+                            startFreshRecognitionSession();
+                        }
                     }
-                }, 150);
+                }, 100);
             }
         };
 
@@ -2497,6 +2594,9 @@ function renderNotes() {
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <span class="note-transcript-label">Transkript</span>
                 <div style="display:flex;gap:4px;">
+                    <button class="summarize-note-btn" data-summarize-id="${note.id}" title="Mengen aufsummieren" style="background:none;border:none;cursor:pointer;color:var(--primary);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;font-size:13px;">
+                        ✨
+                    </button>
                     <button class="pdf-btn" data-pdf-id="${note.id}" title="Als PDF speichern" style="background:none;border:none;cursor:pointer;color:var(--text-muted);width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
                     </button>
@@ -3258,6 +3358,14 @@ function bindEvents() {
                 'Die Aufnahme wird unwiderruflich gelöscht.',
                 () => deleteNote(deleteBtn.dataset.deleteId)
             );
+            return;
+        }
+
+        // Summarize directly on card
+        const sumBtn = target.closest('.summarize-note-btn');
+        if (sumBtn) {
+            e.stopPropagation();
+            summarizeNoteDirectly(sumBtn.dataset.summarizeId);
             return;
         }
 
