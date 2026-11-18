@@ -3,7 +3,62 @@
 // Firebase-basierte Sprachnotizen mit Kategorien
 // ============================================================
 
-const APP_VERSION = '5.1.6';
+const APP_VERSION = '5.2.0';
+const REQUIRE_PASS_KEY = 'notizen_require_password';
+const LOCAL_CATS_KEY = 'notizen_local_categories_v1';
+const LOCAL_NOTES_KEY = 'notizen_local_notes_v1';
+
+const DEFAULT_JOHANNES_USER = {
+    uid: 'johannes_default',
+    displayName: 'Johannes',
+    email: 'backhaus.johannes@gmail.com',
+    emailVerified: true,
+    isLocalDefault: true
+};
+
+function isPasswordRequired() {
+    try { return localStorage.getItem(REQUIRE_PASS_KEY) === 'true'; } catch { return false; }
+}
+function setPasswordRequired(val) {
+    try {
+        if (val) localStorage.setItem(REQUIRE_PASS_KEY, 'true');
+        else localStorage.removeItem(REQUIRE_PASS_KEY);
+    } catch {}
+}
+function readLocalCats() {
+    try {
+        const raw = localStorage.getItem(LOCAL_CATS_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+    } catch {}
+    const seeded = DEFAULT_CATEGORIES.map((c, idx) => ({ id: `cat_default_${idx}`, ...c }));
+    try { localStorage.setItem(LOCAL_CATS_KEY, JSON.stringify(seeded)); } catch {}
+    return seeded;
+}
+function writeLocalCats(cats) {
+    try { localStorage.setItem(LOCAL_CATS_KEY, JSON.stringify(cats)); } catch {}
+}
+function readLocalNotes() {
+    try {
+        const raw = localStorage.getItem(LOCAL_NOTES_KEY);
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return parsed;
+        }
+    } catch {}
+    return [];
+}
+function writeLocalNotes(notes) {
+    try {
+        const serializable = notes.map(n => ({
+            ...n,
+            createdAtMs: n.createdAt?.seconds ? n.createdAt.seconds * 1000 : (typeof n.createdAt === 'number' ? n.createdAt : Date.now())
+        }));
+        localStorage.setItem(LOCAL_NOTES_KEY, JSON.stringify(serializable));
+    } catch {}
+}
 
 const FAQ_HTML = `
 <div style="padding: 0 8px;">
@@ -745,6 +800,11 @@ async function handleLogin() {
 async function handleLogout() {
     try {
         stopPlayback();
+        state.forceLoginScreen = true;
+        if (state.user?.isLocalDefault) {
+            showLogin();
+            return;
+        }
         await signOut(auth);
     } catch (error) {
         showToast('Fehler beim Abmelden', 'error');
@@ -762,6 +822,10 @@ function showLoginError(message) {
 
 // --- Categories ---
 async function loadCategories() {
+    if (state.user?.isLocalDefault) {
+        state.categories = readLocalCats();
+        return;
+    }
     try {
         const q = query(
             collection(db, 'users', state.user.uid, 'categories'),
@@ -775,9 +839,10 @@ async function loadCategories() {
             await createDefaultCategories();
             return loadCategories();
         }
+        writeLocalCats(state.categories);
     } catch (error) {
         console.error('Error loading categories:', error);
-        showToast('Fehler beim Laden der Kategorien', 'error');
+        state.categories = readLocalCats();
     }
 }
 
@@ -854,13 +919,18 @@ async function saveAiSettings() {
 
 async function saveTechnicalTerms() {
     try {
+        localStorage.setItem('notizen_local_terms_v1', JSON.stringify(state.technicalTerms));
+        if (state.user?.isLocalDefault) {
+            showToast('Fachbegriffe gespeichert', 'success');
+            return;
+        }
         const docRef = doc(db, 'users', state.user.uid, 'settings', 'vocabulary');
         // We overwrite the document to ensure deleted terms are removed from Firestore
         await setDoc(docRef, { terms: state.technicalTerms });
         showToast('Fachbegriffe gespeichert', 'success');
     } catch (e) {
         console.error('Error saving terms:', e);
-        showToast('Fehler beim Speichern: ' + e.message, 'error');
+        showToast('Lokal gespeichert', 'info');
     }
 }
 
@@ -876,6 +946,23 @@ async function createDefaultCategories() {
 
 async function saveCategory(data) {
     try {
+        if (state.user?.isLocalDefault) {
+            const cats = readLocalCats();
+            if (state.editingCategoryId) {
+                const idx = cats.findIndex(c => c.id === state.editingCategoryId);
+                if (idx >= 0) cats[idx] = { ...cats[idx], ...data };
+                showToast('Kategorie aktualisiert', 'success');
+            } else {
+                cats.push({ id: `cat_${Date.now()}`, ...data });
+                showToast('Kategorie erstellt', 'success');
+            }
+            writeLocalCats(cats);
+            state.categories = cats;
+            renderCategoryFilter();
+            renderCategoriesList();
+            showCategoriesListView();
+            return;
+        }
         if (state.editingCategoryId) {
             await updateDoc(doc(db, 'users', state.user.uid, 'categories', state.editingCategoryId), data);
             showToast('Kategorie aktualisiert', 'success');
@@ -904,6 +991,16 @@ async function deleteCategory(categoryId) {
             showToast('Kategorie enthält Notizen und kann nicht gelöscht werden', 'error');
             return;
         }
+        if (state.user?.isLocalDefault) {
+            const cats = readLocalCats().filter(c => c.id !== categoryId);
+            writeLocalCats(cats);
+            state.categories = cats;
+            if (state.activeFilter === categoryId) state.activeFilter = 'all';
+            renderCategoryFilter();
+            renderCategoriesList();
+            showToast('Kategorie gelöscht', 'success');
+            return;
+        }
         await deleteDoc(doc(db, 'users', state.user.uid, 'categories', categoryId));
         await loadCategories();
         if (state.activeFilter === categoryId) {
@@ -920,6 +1017,18 @@ async function deleteCategory(categoryId) {
 
 // --- Notes ---
 async function loadNotes() {
+    if (state.user?.isLocalDefault) {
+        const cached = readLocalNotes();
+        const queue = await OfflineManager.getAll().catch(() => []);
+        const blobMap = new Map(queue.map(item => [item.id, item.audioBlob]));
+        state.notes = cached.map(n => ({
+            ...n,
+            audioUrl: blobMap.has(n.id) ? URL.createObjectURL(blobMap.get(n.id)) : (n.audioUrl || ''),
+            createdAt: n.createdAtMs ? new Date(n.createdAtMs) : new Date()
+        }));
+        filterNotes();
+        return;
+    }
     try {
         const q = query(
             collection(db, 'users', state.user.uid, 'notes'),
@@ -927,10 +1036,12 @@ async function loadNotes() {
         );
         const snap = await getDocs(q);
         state.notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        writeLocalNotes(state.notes);
         filterNotes();
     } catch (error) {
         console.error('Error loading notes:', error);
-        showToast('Fehler beim Laden der Notizen', 'error');
+        state.notes = readLocalNotes();
+        filterNotes();
     }
 }
 
@@ -941,12 +1052,14 @@ async function saveNote(title, categoryId, audioBlob, duration, transcript, isSy
             return;
         }
 
-        // Offline Check
-        if (!navigator.onLine && !isSync) {
+        // Offline or Default Local Profile Check
+        if ((!navigator.onLine || state.user?.isLocalDefault) && !isSync) {
+            transcript = applyCategoryTemplate(transcript, categoryId);
             const tempId = `temp_${Date.now()}`;
+            const finalTitle = title || `Notiz vom ${new Date().toLocaleDateString('de-DE')}`;
             const offlineNote = {
                 id: tempId,
-                title,
+                title: finalTitle,
                 categoryId,
                 audioBlob,
                 duration,
@@ -960,16 +1073,21 @@ async function saveNote(title, categoryId, audioBlob, duration, transcript, isSy
             // Add to state for immediate display
             state.notes.unshift({
                 id: tempId,
-                title,
+                title: finalTitle,
                 categoryId,
                 duration,
-                transcript,
-                createdAt: { toDate: () => new Date() }, // Mock Timestamp
-                isOffline: true
+                audioUrl: URL.createObjectURL(audioBlob),
+                waveform: generateWaveformData(),
+                transcript: transcript || '',
+                createdAt: new Date(),
+                createdAtMs: Date.now(),
+                isOffline: !navigator.onLine
             });
-
+            writeLocalNotes(state.notes);
+            filterNotes();
             renderNotes();
-            showToast('Offline gespeichert (Wird später hochgeladen)', 'info');
+            renderCategoryFilter();
+            showToast('Notiz gespeichert!', 'success');
             return;
         }
 
@@ -1018,8 +1136,8 @@ async function appendNote(noteId, audioBlob, duration, transcript, isSync = fals
             return;
         }
 
-        // Offline Check
-        if (!navigator.onLine && !isSync) {
+        // Offline or Local Default Profile Check
+        if ((!navigator.onLine || state.user?.isLocalDefault) && !isSync) {
             const tempId = `temp_append_${Date.now()}`;
             await OfflineManager.addToQueue({
                 id: tempId,
@@ -1030,7 +1148,19 @@ async function appendNote(noteId, audioBlob, duration, transcript, isSync = fals
                 type: 'append',
                 createdAt: Date.now()
             });
-            showToast('Offline angehängt (Wird später hochgeladen)', 'info');
+            const note = state.notes.find(n => n.id === noteId);
+            if (note) {
+                note.duration = (note.duration || 0) + (duration || 0);
+                const ex = (note.transcript || '').trim();
+                const ap = (transcript || '').trim();
+                note.transcript = ex && ap ? `${ex}\n${ap}` : (ex || ap);
+                writeLocalNotes(state.notes);
+                filterNotes();
+                renderNotes();
+            }
+            state.isAppending = false;
+            state.appendingNoteId = null;
+            showToast('Aufnahme angehängt!', 'success');
             return;
         }
 
@@ -1182,6 +1312,13 @@ async function saveTranscript(noteId, newText) {
         const note = state.notes.find(n => n.id === noteId);
         if (note) {
             note.transcript = newText;
+        }
+        if (state.user?.isLocalDefault) {
+            writeLocalNotes(state.notes);
+            showToast('Transkript gespeichert', 'success');
+            filterNotes();
+            renderNotes();
+            return;
         }
         const noteRef = doc(db, 'users', state.user.uid, 'notes', noteId);
         const updatePayload = {
@@ -1466,11 +1603,16 @@ async function deleteNote(noteId) {
             }
         }
 
-        // Delete metadata from Firestore
-        await deleteDoc(doc(db, 'users', state.user.uid, 'notes', noteId));
+        // Delete metadata from Firestore (if connected)
+        if (!state.user?.isLocalDefault) {
+            await deleteDoc(doc(db, 'users', state.user.uid, 'notes', noteId));
+        } else {
+            await OfflineManager.remove(noteId).catch(() => {});
+        }
 
         // Remove from local state
         state.notes = state.notes.filter(n => n.id !== noteId);
+        writeLocalNotes(state.notes);
         filterNotes();
         renderNotes();
         renderCategoryFilter();
@@ -1483,11 +1625,14 @@ async function deleteNote(noteId) {
 
 async function updateNoteTitle(noteId, newTitle) {
     try {
-        await updateDoc(doc(db, 'users', state.user.uid, 'notes', noteId), {
-            title: newTitle
-        });
         const note = state.notes.find(n => n.id === noteId);
         if (note) note.title = newTitle;
+        writeLocalNotes(state.notes);
+        if (!state.user?.isLocalDefault) {
+            await updateDoc(doc(db, 'users', state.user.uid, 'notes', noteId), {
+                title: newTitle
+            });
+        }
     } catch (error) {
         console.error('Error updating note title:', error);
         showToast('Fehler beim Aktualisieren', 'error');
@@ -3192,6 +3337,25 @@ function bindEvents() {
     });
 
     els.btnLogout.addEventListener('click', handleLogout);
+    const btnTogglePasslock = document.getElementById('btn-toggle-passlock');
+    if (btnTogglePasslock) {
+        btnTogglePasslock.addEventListener('click', () => {
+            const nextVal = !isPasswordRequired();
+            setPasswordRequired(nextVal);
+            const lbl = document.getElementById('passlock-menu-label');
+            if (lbl) lbl.textContent = `Passwort beim Start: ${nextVal ? 'An' : 'Aus'}`;
+            els.userMenu.classList.remove('active');
+            showToast(nextVal ? 'Passwortabfrage beim Start aktiviert' : 'Passwortabfrage beim Start deaktiviert (Direktstart als Johannes)', 'info');
+        });
+    }
+    const btnSkipLogin = document.getElementById('auth-skip-btn');
+    if (btnSkipLogin) {
+        btnSkipLogin.addEventListener('click', async () => {
+            state.forceLoginScreen = false;
+            setPasswordRequired(false);
+            await initApp(DEFAULT_JOHANNES_USER);
+        });
+    }
 
     // Categories
     els.btnCategories.addEventListener('click', openCategoriesModal);
@@ -3516,16 +3680,29 @@ function bindEvents() {
 async function initApp(user) {
     state.user = user;
 
-    // Update header
+    // Update header (default displayName: Johannes)
+    const effectiveUser = {
+        ...user,
+        displayName: user.displayName || 'Johannes',
+        email: user.email || 'backhaus.johannes@gmail.com'
+    };
     if (user.photoURL) {
         els.headerAvatar.style.backgroundImage = `url(${user.photoURL})`;
         els.headerAvatar.textContent = '';
     } else {
         els.headerAvatar.style.backgroundImage = 'none';
-        els.headerAvatar.textContent = getInitials(user);
+        els.headerAvatar.textContent = getInitials(effectiveUser);
     }
-    els.userMenuName.textContent = user.displayName || 'Benutzer';
-    els.userMenuEmail.textContent = user.email || '';
+    els.userMenuName.textContent = effectiveUser.displayName;
+    els.userMenuEmail.textContent = effectiveUser.email;
+    const passlockLabel = document.getElementById('passlock-menu-label');
+    if (passlockLabel) {
+        passlockLabel.textContent = `Passwort beim Start: ${isPasswordRequired() ? 'An' : 'Aus'}`;
+    }
+    const logoutLabel = document.getElementById('logout-menu-label');
+    if (logoutLabel) {
+        logoutLabel.textContent = user.isLocalDefault ? 'Cloud-Konto anmelden' : 'Abmelden / Sperren';
+    }
 
     // Load data
     await Promise.all([loadCategories(), loadNotes(), loadTechnicalTerms(), loadAiSettings()]);
@@ -3633,13 +3810,19 @@ async function main() {
             } catch (e) {
                 // If it fails (e.g. network error), we just use the current state
             }
-            if (user.emailVerified) {
+            if (user.emailVerified || !isPasswordRequired()) {
+                state.forceLoginScreen = false;
                 await initApp(user);
                 return;
             }
         }
 
-        // Unverified or not logged in
+        if (!isPasswordRequired() && !state.forceLoginScreen) {
+            await initApp(DEFAULT_JOHANNES_USER);
+            return;
+        }
+
+        // Password required or explicitly requested login screen
         state.user = null;
         state.categories = [];
         state.notes = [];
