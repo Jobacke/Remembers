@@ -1,10 +1,10 @@
-const CACHE_NAME = 'sprachnotizen-v5.4.2';
+const CACHE_NAME = 'sprachnotizen-v5.4.3';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/css/style-v5.0.1.css',
   '/css/terms.css',
-  '/js/app-v5.4.2.js',
+  '/js/app-v5.4.3.js',
   '/js/config.js',
   '/manifest.json',
   '/icons/icon-192.png',
@@ -45,12 +45,14 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request.url, { cache: 'no-cache', credentials: 'same-origin' })
       .then((response) => {
-        const clone = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, clone);
-        });
+        if (response && response.status === 200) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, clone);
+          });
+        }
         return response;
       })
       .catch(() => {
