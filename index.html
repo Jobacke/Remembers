@@ -48,6 +48,43 @@
       fill: #EAB308 !important;
       stroke: #EAB308 !important;
     }
+
+    /* Modern Sigma Sum Pill Button (v5.4.2) */
+    .sum-pill-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      height: 30px;
+      padding: 0 11px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, rgba(234, 179, 8, 0.22), rgba(234, 179, 8, 0.1));
+      border: 1px solid rgba(250, 204, 21, 0.48);
+      color: #fde047;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.015em;
+      cursor: pointer;
+      white-space: nowrap;
+      box-shadow: 0 2px 10px rgba(234, 179, 8, 0.14);
+      transition: transform 0.14s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+    }
+
+    .sum-pill-btn:hover {
+      background: linear-gradient(135deg, rgba(234, 179, 8, 0.34), rgba(234, 179, 8, 0.18));
+      border-color: rgba(250, 204, 21, 0.78);
+      box-shadow: 0 4px 14px rgba(234, 179, 8, 0.24);
+      transform: translateY(-1px);
+    }
+
+    .sum-pill-btn:active {
+      transform: scale(0.96);
+    }
+
+    .sum-pill-btn svg {
+      flex-shrink: 0;
+    }
   </style>
 </head>
 
@@ -200,7 +237,7 @@
           <span id="logout-menu-label">Abmelden</span>
         </button>
         <div class="user-menu-footer" style="padding: 12px; font-size: 11px; text-align: center; color: white;">
-          v<span id="app-version-display">5.4.1</span>
+          v<span id="app-version-display">5.4.2</span>
         </div>
       </div>
     </header>
@@ -298,8 +335,11 @@
             <div style="display:flex; gap:6px; flex-wrap:wrap;">
               <button id="retranscribe-ai-btn" type="button" class="btn btn-sm btn-secondary" style="font-size:11px; padding:3px 8px; flex:none;"
                 title="Mit medizinischer KI aus Audio neu transkribieren">🎙️ KI-Präzision</button>
-              <button id="summarize-btn" type="button" class="btn btn-sm btn-secondary" style="font-size:11px; padding:3px 8px; flex:none;"
-                title="Materialien zusammenzählen">✨ Mengen</button>
+              <button id="summarize-btn" type="button" class="sum-pill-btn" style="height:26px; padding:0 9px; font-size:11px; flex:none;"
+                title="Gleiche Materialien automatisch aufsummieren">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" width="12" height="12" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 5H6l6 7-6 7h12"/></svg>
+                <span>Summe</span>
+              </button>
               <button id="toggle-terms-inline" type="button" class="btn btn-sm btn-secondary"
                 style="font-size:11px; padding:3px 8px; flex:none;">+ Fachbegriff</button>
             </div>
@@ -546,12 +586,12 @@
   <!-- ========== TOAST CONTAINER ========== -->
   <div id="version-overlay"
     style="position: fixed; bottom: 8px; right: 8px; font-size: 13px; font-weight: bold; color: rgba(255,255,255,0.8); background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 9999;">
-    v5.4.1</div>
+    v5.4.2</div>
   <div id="toast-container" class="toast-container"></div>
 
   <!-- ========== SCRIPTS ========== -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script type="module" src="js/app-v5.4.1.js"></script>
+  <script type="module" src="js/app-v5.4.2.js"></script>
 
 </body>
 
