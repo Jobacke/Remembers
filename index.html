@@ -18,6 +18,10 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png?v=2">
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=2">
   <link rel="manifest" href="manifest.json">
+  <script>
+    // Im Board-Fenster (iframe) liegt die Board-Leiste über der Kamera-Aussparung – dort keinen Extra-Abstand oben
+    try { if (window.parent && window.parent !== window) document.documentElement.classList.add('im-board'); } catch (e) {}
+  </script>
   <link rel="stylesheet" href="css/style-v5.0.1.css">
   <link rel="stylesheet" href="css/terms.css">
   <style>
@@ -48,6 +52,11 @@
       fill: #EAB308 !important;
       stroke: #EAB308 !important;
     }
+
+    /* v5.4.6: Abstand oben nur einmal (im Kopf), nicht zusätzlich für die ganze Seite.
+       Vorher doppelt → leere, goldgelb schimmernde Fläche über dem Kopf. */
+    #app { padding-top: 0 !important; }
+    html.im-board { --safe-top: 0px !important; }
 
     /* Modern Sigma Sum Pill Button (v5.4.2) */
     .sum-pill-btn {
@@ -237,7 +246,7 @@
           <span id="logout-menu-label">Abmelden</span>
         </button>
         <div class="user-menu-footer" style="padding: 12px; font-size: 11px; text-align: center; color: white;">
-          Version <span id="app-version-display">5.4.5</span>
+          Version <span id="app-version-display">5.4.6</span>
         </div>
       </div>
     </header>
@@ -586,12 +595,12 @@
   <!-- ========== TOAST CONTAINER ========== -->
   <div id="version-overlay"
     style="position: fixed; bottom: 8px; right: 8px; font-size: 11px; font-weight: 700; color: rgba(255,255,255,0.85); background: rgba(0,0,0,0.55); padding: 4px 8px; border-radius: 999px; pointer-events: none; z-index: 9999; white-space: nowrap;">
-    Version 5.4.5</div>
+    Version 5.4.6</div>
   <div id="toast-container" class="toast-container"></div>
 
   <!-- ========== SCRIPTS ========== -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <script type="module" src="js/app-v5.4.5.js"></script>
+  <script type="module" src="js/app-v5.4.6.js"></script>
 
 </body>
 
